@@ -7,13 +7,14 @@ import type {
 } from "@/types/api";
 import { get, post, del, delWithParams, ApiClientError, API_BASE } from "./client";
 
-export function listRecordings(params?: {
+export async function listRecordings(params?: {
     limit?: number;
     offset?: number;
     host?: string;
     path_prefix?: string;
 }): Promise<RecordingSession[]> {
-    return get<RecordingSession[]>(`${API_BASE}/recordings`, params);
+    const result = await get<RecordingSession[]>(`${API_BASE}/recordings`, params);
+    return result ?? [];
 }
 
 export function getRecording(

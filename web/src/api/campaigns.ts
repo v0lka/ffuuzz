@@ -8,12 +8,13 @@ import type {
 } from "@/types/api";
 import { get, post, API_BASE } from "./client";
 
-export function listCampaigns(params?: {
+export async function listCampaigns(params?: {
     status?: string;
     limit?: number;
     offset?: number;
 }): Promise<Campaign[]> {
-    return get<Campaign[]>(`${API_BASE}/campaigns`, params);
+    const result = await get<Campaign[]>(`${API_BASE}/campaigns`, params);
+    return result ?? [];
 }
 
 export function getCampaign(id: string): Promise<Campaign> {
@@ -28,7 +29,7 @@ export function getCampaignStats(id: string): Promise<CampaignStats> {
     return get<CampaignStats>(`${API_BASE}/campaigns/${id}/stats`);
 }
 
-export function getCampaignFindings(
+export async function getCampaignFindings(
     id: string,
     params?: {
         type?: string;
@@ -38,7 +39,8 @@ export function getCampaignFindings(
         offset?: number;
     },
 ): Promise<Finding[]> {
-    return get<Finding[]>(`${API_BASE}/campaigns/${id}/findings`, params);
+    const result = await get<Finding[]>(`${API_BASE}/campaigns/${id}/findings`, params);
+    return result ?? [];
 }
 
 export function createCampaign(
