@@ -16,7 +16,7 @@ func TestRecorder_RecordConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewJSONL: %v", err)
 	}
-	defer rec.Close()
+	defer func() { _ = rec.Close() }()
 
 	const N = 50
 	var wg sync.WaitGroup

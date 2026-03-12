@@ -1,3 +1,4 @@
+// Package diff provides structural comparison of recorded HTTP transactions.
 package diff
 
 import "ffuuzz/internal/recorder"
@@ -8,6 +9,7 @@ type FieldDiff struct {
 	New   interface{} `json:"new"`
 }
 
+// TxDiff describes the differences between two recorded transactions.
 type TxDiff struct {
 	RequestIDA string      `json:"request_id_a"`
 	RequestIDB string      `json:"request_id_b"`

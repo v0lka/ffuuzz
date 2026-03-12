@@ -1,3 +1,4 @@
+// Package report builds aggregate summaries from recorded transactions.
 package report
 
 import (
@@ -6,6 +7,7 @@ import (
 	"ffuuzz/internal/recorder"
 )
 
+// Summary aggregates statistics from a set of recorded transactions.
 type Summary struct {
 	Total    int            `json:"total"`
 	ByMethod map[string]int `json:"by_method"`
