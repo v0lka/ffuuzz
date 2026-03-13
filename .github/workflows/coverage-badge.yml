@@ -31,7 +31,9 @@ jobs:
           filename: coverage.out
 
       - name: Commit changes
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "chore: Updated coverage badge."
-          files: README.md
+          file_pattern: README.md
+          skip_checkout: true
+          skip_fetch: true

@@ -152,13 +152,13 @@ FFUZZ должна обеспечивать:
 Исполняемый бинарь `ffuuzz` поддерживает следующие подкоманды:
 
 - **`serve`** — запуск полной системы (прокси + Control API + движок). Основной production-режим. В этом режиме используется `DBRecorder` для прямой записи в PostgreSQL с endpoint-группировкой и `endpoint.Resolver` для статистического обнаружения паттернов.
-  > 📎 **Реализация:** [main.go](cmd/ffuuzz/main.go) — `runServe()`: инициализация DB, миграции, store'ы, corpus manager, engine, endpoint.Resolver (RebuildFromDB), DBRecorder, MITM proxy, API server ([server.go](internal/httputil/server.go) — `NewHTTPServer()`), graceful shutdown.
+  > 📎 **Реализация:** [serve.go](internal/cli/serve.go) — `runServe()`: инициализация DB, миграции, store'ы, corpus manager, engine, endpoint.Resolver (RebuildFromDB), DBRecorder, MITM proxy, API server ([server.go](internal/httputil/server.go) — `NewHTTPServer()`), graceful shutdown.
 
 - **`proxy`** — запуск только MITM-прокси (dev-режим для отладки и записи трафика без БД и API).
-  > 📎 **Реализация:** [main.go](cmd/ffuuzz/main.go) — `runProxy()`: standalone MITM-прокси с записью в JSONL, CLI-флаги (port, output, cert dir, max body).
+  > 📎 **Реализация:** [proxy.go](internal/cli/proxy.go) — `runProxy()`: standalone MITM-прокси с записью в JSONL, CLI-флаги (port, output, cert dir, max body).
 
 - **`record`** — анализ записанного JSONL-лога: парсинг TxRecord, построение сводки (report).
-  > 📎 **Реализация:** [main.go](cmd/ffuuzz/main.go) — `runRecord()`: чтение TxRecord из JSONL, `report.BuildSummary()`, вывод JSON в stdout.
+  > 📎 **Реализация:** [record.go](internal/cli/record.go) — `runRecord()`: чтение TxRecord из JSONL, `report.BuildSummary()`, вывод JSON в stdout.
 
 ---
 
@@ -180,7 +180,7 @@ FFUZZ должна обеспечивать:
   > 📎 **Реализация:** [model.go](internal/model/model.go) — `CampaignLimits` (Workers, RPS, MaxTests, DurationSec, ReqTimeoutMs); [ratelimit.go](internal/engine/ratelimit.go) — token-bucket RPS limiter; [engine.go](internal/engine/engine.go) — проверка maxTests/duration в цикле генерации.
 
 - Корректное завершение всех компонентов по SIGINT/SIGTERM.
-  > 📎 **Реализация:** [main.go](cmd/ffuuzz/main.go) — `signal.NotifyContext(SIGINT, SIGTERM)`, последовательное завершение: API → Engine.StopAll → Proxy.
+  > 📎 **Реализация:** [serve.go](internal/cli/serve.go) — `signal.NotifyContext(SIGINT, SIGTERM)`, последовательное завершение: API → Engine.StopAll → Proxy.
 
 ---
 
@@ -667,7 +667,7 @@ FFUZZ должен поддерживать конфигурирование ч�
 - FFUUZZ_RPS
 
 > 📎 **Реализация (10):**
-> - Env vars + CLI flags: [config.go](internal/config/config.go) — `Load()` читает `os.Getenv("FFUUZZ_*")`, CLI-флаги в [main.go](cmd/ffuuzz/main.go).
+> - Env vars + CLI flags: [config.go](internal/config/config.go) — `Load()` читает `os.Getenv("FFUUZZ_*")`, CLI-флаги обрабатываются в пакете `internal/cli` ([serve.go](internal/cli/serve.go), [proxy.go](internal/cli/proxy.go), [record.go](internal/cli/record.go)).
 > - `FFUUZZ_API_ADDRESS` / `-a`: [config.go](internal/config/config.go).
 > - `FFUUZZ_PROXY_ADDRESS` / `-p`: [config.go](internal/config/config.go).
 > - `FFUUZZ_DATABASE_URI` / `-d`: [config.go](internal/config/config.go).
@@ -1862,7 +1862,7 @@ ffuuzz_tests_total 12345
 7. /metrics экспортирует метрики.
 
 > 📎 **Реализация (14):**
-> - П. 1: [main.go](cmd/ffuuzz/main.go) — `runServe()`, graceful shutdown по SIGINT/SIGTERM; docker-compose.yml в корне проекта.
+> - П. 1: [serve.go](internal/cli/serve.go) — `runServe()`, graceful shutdown по SIGINT/SIGTERM; docker-compose.yml в корне проекта.
 > - П. 2: [mitm.go](internal/mitm/mitm.go), [store.go](internal/store/store.go) — proxy + cert store + LRU cache + metrics.
 > - П. 3: [recorder.go](internal/recorder/recorder.go), [recordings.go](internal/api/recordings.go) — запись + импорт.
 > - П. 4: [campaigns.go](internal/api/campaigns.go) — CRUD + start/stop; [campaigns.go](internal/api/campaigns.go) — stats; [campaigns.go](internal/api/campaigns.go) — findings list.
@@ -1883,7 +1883,7 @@ ffuuzz_tests_total 12345
 - набор тестов (unit + минимум один интеграционный сценарий).
 
 > 📎 **Реализация (15):**
-> - Исходный код: `cmd/ffuuzz/`, `internal/` (19 пакетов: mitm, api, engine, mutate, anomaly, triage, replayer, corpus, recorder, db, store, config, metrics, logging, httputil, diff, report, model, endpoint), `web/`.
+> - Исходный код: `cmd/ffuuzz/`, `internal/` (20 пакетов: cli, mitm, api, engine, mutate, anomaly, triage, replayer, corpus, recorder, db, store, config, metrics, logging, httputil, diff, report, model, endpoint), `web/`.
 > - Миграции: [internal/db/migrations/](internal/db/migrations/) — `001_initial.up.sql`, `002_reproduce_runs.up.sql`, `003_recording_target_path.up.sql`, `004_finding_mutation.up.sql`.
 > - README: [README.md](README.md) — содержит инструкции по запуску PostgreSQL (docker-compose), FFUZZ (serve/proxy/record), записи трафика, импорту сессий и запуску кампании через Web UI.
 > - Тесты: 28 файлов `*_test.go` в 18 пакетах (anomaly, api, config, corpus, db, diff, endpoint, engine, httputil, logging, metrics, mitm, mutate, recorder, replayer, report, store, triage).

@@ -53,10 +53,11 @@ make test
 ```
 .
 ├── cmd/
-│   └── ffuuzz/              # Application entry point (main.go)
+│   └── ffuuzz/              # Application entry point (main.go) - minimal, delegates to cli package
 ├── internal/
 │   ├── anomaly/             # Anomaly detection (timeout, 5xx, latency, regex)
 │   ├── api/                 # REST API handlers (Gin-based) and SSE streaming
+│   ├── cli/                 # CLI commands implementation (serve, proxy, record)
 │   ├── config/              # Configuration loading (env vars + CLI flags)
 │   ├── corpus/              # Corpus manager (loads seeds for campaigns)
 │   ├── db/                  # Database layer (sqlx, migrations, stores)
@@ -239,6 +240,10 @@ graph TD
 ### `internal/model`
 
 Core domain types shared by all packages: `RecordingSession`, `Exchange`, `Campaign`, `Finding`, `Artifact`, `CampaignConfig`, etc. This package has no internal dependencies.
+
+### `internal/cli`
+
+CLI command implementations. Contains the logic for all CLI commands (`serve`, `proxy`, `record`) that was extracted from `main.go`. The `CLI` struct in `cli.go` handles command routing, while individual command implementations are in `serve.go`, `proxy.go`, and `record.go`. This separation keeps `main.go` minimal and focused only on initialization.
 
 ### `internal/mitm`
 
