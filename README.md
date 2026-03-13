@@ -1,6 +1,6 @@
 # FFUUZZ
 [![Tests](https://github.com/v0lka/ffuuzz/actions/workflows/tests.yml/badge.svg)](https://github.com/v0lka/ffuuzz/actions/workflows/tests.yml)
-![Coverage](https://img.shields.io/badge/Coverage-84.2%25-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-81.4%25-brightgreen)
 
 FFUZZ is a web application security testing tool that combines MITM proxy traffic recording with intelligent mutation-based fuzzing. It captures HTTP/HTTPS traffic, replays it with various mutations, and detects anomalies that may indicate security vulnerabilities.
 
