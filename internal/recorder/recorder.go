@@ -227,14 +227,17 @@ func (d *DBRecorder) Record(tx *TxRecord) error {
 		EntryCount: 1,
 	}
 
+	d.mu.Lock()
 	_, created, err := d.store.FindOrAppend(context.Background(), sess)
 	if err != nil {
+		d.mu.Unlock()
 		d.logger.Error().Err(err).Str("request_id", tx.RequestID).Msg("failed to record exchange to database")
 		return err
 	}
 	if created {
 		metrics.CorpusSize.Inc()
 	}
+	d.mu.Unlock()
 
 	return nil
 }

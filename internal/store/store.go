@@ -20,6 +20,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/rs/zerolog"
+	"golang.org/x/sync/singleflight"
 
 	"ffuuzz/internal/config"
 	"ffuuzz/internal/metrics"
@@ -38,6 +39,7 @@ type CertStore struct {
 	tlsTimeout time.Duration
 	tlsCiphers []uint16
 	tlsNoTick  bool
+	sfGroup    singleflight.Group
 }
 
 func NewCertStore(cfg config.CertCacheConfig, tlsCfg config.TLSConfig, logger zerolog.Logger) (*CertStore, error) {
@@ -210,6 +212,7 @@ func (c *CertStore) createRoot() error {
 
 // GetCertFor returns a leaf certificate for the given hostname, using the LRU
 // cache. On cache miss it generates a new certificate with retry.
+// Uses singleflight to prevent concurrent generation of the same certificate.
 func (c *CertStore) GetCertFor(host string) (tls.Certificate, error) {
 	c.mu.Lock()
 	if cert, ok := c.cache.Get(host); ok {
@@ -217,26 +220,42 @@ func (c *CertStore) GetCertFor(host string) (tls.Certificate, error) {
 		c.mu.Unlock()
 		return *cert, nil
 	}
-	metrics.CertCacheMisses.Inc()
 	c.mu.Unlock()
 
-	const maxRetries = 3
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		cert, err := c.generateLeaf(host)
-		if err != nil {
-			lastErr = err
-			metrics.CertErrors.Inc()
-			c.logger.Warn().Err(err).Str("host", host).Int("attempt", attempt+1).Msg("cert generation failed")
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
+	result, err, _ := c.sfGroup.Do(host, func() (any, error) {
+		// Double-check cache inside singleflight to handle race
 		c.mu.Lock()
-		c.cache.Add(host, &cert)
+		if cert, ok := c.cache.Get(host); ok {
+			c.mu.Unlock()
+			return *cert, nil
+		}
 		c.mu.Unlock()
-		return cert, nil
+
+		metrics.CertCacheMisses.Inc()
+
+		const maxRetries = 3
+		var lastErr error
+		for attempt := range maxRetries {
+			cert, err := c.generateLeaf(host)
+			if err != nil {
+				lastErr = err
+				metrics.CertErrors.Inc()
+				c.logger.Warn().Err(err).Str("host", host).Int("attempt", attempt+1).Msg("cert generation failed")
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			c.mu.Lock()
+			c.cache.Add(host, &cert)
+			c.mu.Unlock()
+			return cert, nil
+		}
+		return tls.Certificate{}, fmt.Errorf("cert generation failed after %d attempts: %w", maxRetries, lastErr)
+	})
+
+	if err != nil {
+		return tls.Certificate{}, err
 	}
-	return tls.Certificate{}, fmt.Errorf("cert generation failed after %d attempts: %w", maxRetries, lastErr)
+	return result.(tls.Certificate), nil
 }
 
 func (c *CertStore) generateLeaf(host string) (tls.Certificate, error) {

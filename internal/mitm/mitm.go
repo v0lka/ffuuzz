@@ -85,7 +85,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	reqID := httputil.NewRequestID()
 
-	outReq := r.Clone(context.Background())
+	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
 
 	if outReq.URL.Scheme == "" {
@@ -105,7 +105,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
 		p.logger.Error().Err(err).Str("request_id", reqID).Str("url", outReq.URL.String()).Msg("upstream error")
-		http.Error(w, "upstream error: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -150,10 +150,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type singleConnListener struct {
-	conn     net.Conn
-	once     sync.Once
-	connCh   chan net.Conn
-	done     chan struct{}
+	conn   net.Conn
+	once   sync.Once
+	connCh chan net.Conn
+	done   chan struct{}
 }
 
 func newSingleConnListener(c net.Conn) *singleConnListener {
