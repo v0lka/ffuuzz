@@ -72,12 +72,15 @@ func (s *Server) serveIndex(c *gin.Context) {
 	}
 	defer func() { _ = f.Close() }()
 
-	stat, _ := f.Stat()
+	stat, err := f.Stat()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("stat index.html failed")
+	}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.Header("Cache-Control", "no-cache")
 	c.Status(http.StatusOK)
 
-	if rs, ok := f.(io.ReadSeeker); ok {
+	if rs, ok := f.(io.ReadSeeker); ok && stat != nil {
 		http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), rs)
 	} else {
 		_, _ = io.Copy(c.Writer, f)

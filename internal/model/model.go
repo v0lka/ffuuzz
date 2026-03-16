@@ -160,6 +160,18 @@ const (
 	FindingConfirmed   FindingStatus = "CONFIRMED"
 )
 
+// ReproduceStatus tracks the state of a reproduction attempt.
+type ReproduceStatus string
+
+const (
+	ReproducePending       ReproduceStatus = "PENDING"
+	ReproduceEnqueued      ReproduceStatus = "ENQUEUED"
+	ReproduceRunning       ReproduceStatus = "RUNNING"
+	ReproduceFailed        ReproduceStatus = "FAILED"
+	ReproduceNotReproduced ReproduceStatus = "NOT_REPRODUCED"
+	ReproduceConfirmed     ReproduceStatus = "CONFIRMED"
+)
+
 // FindingDetails carries type-specific metrics for a finding.
 type FindingDetails struct {
 	BaselineMs int64 `json:"baseline_ms,omitempty"`

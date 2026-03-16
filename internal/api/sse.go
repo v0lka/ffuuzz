@@ -13,7 +13,10 @@ import (
 
 // streamCampaignStats implements GET /api/v1/campaigns/:id/stream as an SSE endpoint.
 func (s *Server) streamCampaignStats(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	// Verify campaign exists.
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)

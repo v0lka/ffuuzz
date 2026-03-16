@@ -105,7 +105,10 @@ func (r *Replayer) ReplayExchange(ctx context.Context, ex model.Exchange, baseUR
 
 	// Update cookies and extract variables
 	if wctx != nil {
-		reqURL, _ := url.Parse(fullURL)
+		reqURL, err := url.Parse(fullURL)
+		if err != nil {
+			r.logger.Warn().Err(err).Str("url", fullURL).Msg("parse URL for cookie update failed")
+		}
 		if reqURL != nil {
 			wctx.UpdateCookies(resp, reqURL)
 		}

@@ -321,7 +321,9 @@ func (e *Engine) StopCampaign(ctx context.Context, id string) error {
 	_, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignRunning, model.CampaignStopping)
 	if err != nil {
 		// Try from STARTING
-		_, _ = e.campaigns.UpdateStatus(ctx, id, model.CampaignStarting, model.CampaignStopping)
+		if _, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignStarting, model.CampaignStopping); err != nil {
+			e.logger.Warn().Err(err).Str("campaign_id", id).Msg("fallback status transition to STOPPING failed")
+		}
 	}
 
 	cancel()
@@ -348,7 +350,9 @@ func (e *Engine) StopAll(ctx context.Context) {
 	e.mu.Unlock()
 
 	for id, cancel := range cancels {
-		_, _ = e.campaigns.UpdateStatus(ctx, id, model.CampaignRunning, model.CampaignStopping)
+		if _, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignRunning, model.CampaignStopping); err != nil {
+			e.logger.Warn().Err(err).Str("campaign_id", id).Msg("status transition to STOPPING failed during shutdown")
+		}
 		cancel()
 	}
 }
@@ -363,7 +367,9 @@ func (e *Engine) IsRunning(id string) bool {
 
 func (e *Engine) failCampaign(ctx context.Context, id string, fromStatus model.CampaignStatus, reason error) {
 	e.logger.Error().Err(reason).Str("campaign_id", id).Msg("campaign failed")
-	_, _ = e.campaigns.UpdateStatus(ctx, id, fromStatus, model.CampaignFailed)
+	if _, err := e.campaigns.UpdateStatus(ctx, id, fromStatus, model.CampaignFailed); err != nil {
+		e.logger.Warn().Err(err).Str("campaign_id", id).Msg("status transition to FAILED failed")
+	}
 }
 
 // StartReproduceWorker spawns the background reproduce-finding poller.

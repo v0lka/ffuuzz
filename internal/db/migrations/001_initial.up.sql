@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS findings (
     reproduce_enqueued_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_findings_campaign ON findings(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_findings_signature ON findings(signature);
+CREATE INDEX IF NOT EXISTS idx_findings_campaign_signature ON findings(campaign_id, signature);
 
 CREATE TABLE IF NOT EXISTS artifacts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

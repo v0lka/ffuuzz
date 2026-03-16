@@ -72,11 +72,35 @@ func (s *Server) importRecordings(c *gin.Context) {
 	}
 
 	for i := range req.Sessions {
+		sess := &req.Sessions[i]
+
+		// Validate individual session fields.
+		if !validateStringLen(sess.ID, 255) {
+			result.Failed++
+			result.Errors = append(result.Errors, "session at index "+strconv.Itoa(i)+": id exceeds 255 characters")
+			continue
+		}
+		if sess.Target.Scheme != "" && !validateScheme(sess.Target.Scheme) {
+			result.Failed++
+			result.Errors = append(result.Errors, "session "+sess.ID+": scheme must be http or https")
+			continue
+		}
+		if !validateStringLen(sess.Target.Host, 253) {
+			result.Failed++
+			result.Errors = append(result.Errors, "session "+sess.ID+": host exceeds 253 characters")
+			continue
+		}
+		if !validateStringLen(sess.Target.Path, 2048) {
+			result.Failed++
+			result.Errors = append(result.Errors, "session "+sess.ID+": path exceeds 2048 characters")
+			continue
+		}
+
 		// Normalise the target path so imported recordings use the same
 		// endpoint patterns as live recordings from the proxy.
-		req.Sessions[i].Target.Path = endpoint.NormalizePath(req.Sessions[i].Target.Path)
+		sess.Target.Path = endpoint.NormalizePath(sess.Target.Path)
 
-		inserted, err := s.recordings.Upsert(c.Request.Context(), req.Sessions[i])
+		inserted, err := s.recordings.Upsert(c.Request.Context(), *sess)
 		if err != nil {
 			s.logger.Error().Err(err).Str("recording_id", req.Sessions[i].ID).Msg("import session failed")
 			result.Failed++
@@ -98,9 +122,18 @@ func (s *Server) importRecordings(c *gin.Context) {
 }
 
 func (s *Server) listRecordings(c *gin.Context) {
-	limit, offset := parsePagination(c)
+	limit, offset := s.parsePagination(c)
 	host := c.Query("host")
+	if !validateStringLen(host, 253) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_HOST", "host must not exceed 253 characters")
+		return
+	}
 	pathPrefix := c.Query("path_prefix")
+	if !validateStringLen(pathPrefix, 2048) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PATH_PREFIX", "path_prefix must not exceed 2048 characters")
+		return
+	}
+	pathPrefix = escapeLikePattern(pathPrefix)
 
 	sessions, err := s.recordings.List(c.Request.Context(), limit, offset, host, pathPrefix)
 	if err != nil {
@@ -122,7 +155,16 @@ type exportResponse struct {
 
 func (s *Server) exportRecordings(c *gin.Context) {
 	host := c.Query("host")
+	if !validateStringLen(host, 253) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_HOST", "host must not exceed 253 characters")
+		return
+	}
 	pathPrefix := c.Query("path_prefix")
+	if !validateStringLen(pathPrefix, 2048) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PATH_PREFIX", "path_prefix must not exceed 2048 characters")
+		return
+	}
+	pathPrefix = escapeLikePattern(pathPrefix)
 
 	sessions, err := s.recordings.ListAll(c.Request.Context(), host, pathPrefix)
 	if err != nil {
@@ -285,11 +327,29 @@ func (s *Server) deleteRecordingsByPrefix(c *gin.Context) {
 		return
 	}
 
+	if !validateScheme(scheme) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_SCHEME", "scheme must be http or https")
+		return
+	}
+	if !validateStringLen(host, 253) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_HOST", "host must not exceed 253 characters")
+		return
+	}
+
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		errorResponse(c, http.StatusBadRequest, "INVALID_PORT", "port must be an integer")
 		return
 	}
+	if !validatePort(port) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PORT", "port must be between 1 and 65535")
+		return
+	}
+	if !validateStringLen(pathPrefix, 2048) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PATH_PREFIX", "path_prefix must not exceed 2048 characters")
+		return
+	}
+	pathPrefix = escapeLikePattern(pathPrefix)
 
 	n, err := s.recordings.DeleteByPrefix(c.Request.Context(), scheme, host, port, pathPrefix)
 	if err != nil {
@@ -309,9 +369,16 @@ func (s *Server) deleteRecordingsByPrefix(c *gin.Context) {
 }
 
 func (s *Server) getRecording(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 	includeEntries := c.DefaultQuery("include_entries", "false") == "true"
-	maxBodyBytes, _ := strconv.Atoi(c.DefaultQuery("max_body_bytes", "0"))
+	maxBodyBytes, err := strconv.Atoi(c.DefaultQuery("max_body_bytes", "0"))
+	if err != nil {
+		s.logger.Warn().Err(err).Str("param", "max_body_bytes").Msg("invalid query parameter, using default")
+		maxBodyBytes = 0
+	}
 
 	sess, err := s.recordings.GetByID(c.Request.Context(), id, includeEntries, maxBodyBytes)
 	if err != nil {
@@ -327,7 +394,10 @@ func (s *Server) getRecording(c *gin.Context) {
 }
 
 func (s *Server) deleteRecording(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	used, err := s.recordings.IsUsedByActiveCampaign(c.Request.Context(), id)
 	if err != nil {

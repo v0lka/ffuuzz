@@ -85,7 +85,9 @@ func (c *CLI) runProxy(args []string) int {
 	}
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutCancel()
-	_ = proxy.Shutdown(shutCtx)
+	if err := proxy.Shutdown(shutCtx); err != nil {
+		logger.Warn().Err(err).Msg("proxy shutdown error")
+	}
 
 	return 0
 }

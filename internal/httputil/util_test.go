@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestNewRequestID_NonEmpty(t *testing.T) {
@@ -22,6 +24,21 @@ func TestNewRequestID_Unique(t *testing.T) {
 			t.Fatalf("duplicate ID: %s", id)
 		}
 		ids[id] = true
+	}
+}
+
+func TestNewRequestID_ValidFormat(t *testing.T) {
+	id := NewRequestID()
+	// NewRequestID format is "YYYYMMDD-UUIDv4", extract and validate the UUID part
+	parts := strings.Split(id, "-")
+	if len(parts) != 6 { // YYYYMMDD + 5 parts of UUID
+		t.Errorf("NewRequestID() has unexpected format: %s", id)
+		return
+	}
+	// Reconstruct UUID from parts[1:] (first part is YYYYMMDD)
+	uuidStr := strings.Join(parts[1:], "-")
+	if _, err := uuid.Parse(uuidStr); err != nil {
+		t.Errorf("NewRequestID() produced invalid UUID: %s, error: %v", id, err)
 	}
 }
 

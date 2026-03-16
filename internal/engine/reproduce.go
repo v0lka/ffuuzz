@@ -151,9 +151,9 @@ func (w *ReproduceWorker) processJob(ctx context.Context, findingID string, runs
 	}
 
 	// Majority threshold: reproduced in at least half the runs
-	status := "NOT_REPRODUCED"
+	status := string(model.ReproduceNotReproduced)
 	if reproduced >= (runs+1)/2 {
-		status = "CONFIRMED"
+		status = string(model.ReproduceConfirmed)
 	}
 
 	w.logger.Info().
@@ -169,7 +169,7 @@ func (w *ReproduceWorker) processJob(ctx context.Context, findingID string, runs
 }
 
 func (w *ReproduceWorker) failJob(ctx context.Context, findingID string) {
-	if err := w.findings.SetReproduceStatus(ctx, findingID, "FAILED"); err != nil {
+	if err := w.findings.SetReproduceStatus(ctx, findingID, string(model.ReproduceFailed)); err != nil {
 		w.logger.Error().Err(err).Str("finding_id", findingID).Msg("fail reproduce job status update failed")
 	}
 }

@@ -158,10 +158,10 @@ func (c *CertStore) loadOrCreateRoot() error {
 
 	certPath = filepath.Join(c.dir, "ca.pem")
 	keyPath = filepath.Join(c.dir, "ca.key")
-	if err := atomicWrite(certPath, certPEM, 0644); err != nil {
+	if err := atomicWrite(c.logger, certPath, certPEM, 0644); err != nil {
 		return err
 	}
-	if err := atomicWrite(keyPath, keyPEM, 0600); err != nil {
+	if err := atomicWrite(c.logger, keyPath, keyPEM, 0600); err != nil {
 		return err
 	}
 	return nil
@@ -291,12 +291,12 @@ func (c *CertStore) generateLeaf(host string) (tls.Certificate, error) {
 			Type:  "RSA PRIVATE KEY",
 			Bytes: x509.MarshalPKCS1PrivateKey(priv),
 		})
-		if err := atomicWrite(filepath.Join(c.dir, host+".pem"), certPEM, 0644); err != nil {
+		if err := atomicWrite(c.logger, filepath.Join(c.dir, host+".pem"), certPEM, 0644); err != nil {
 			c.logger.Warn().Err(err).Str("host", host).Msg("failed to write cert to disk")
 			metrics.CertErrors.Inc()
 			// Non-fatal: cert still works in memory
 		}
-		if err := atomicWrite(filepath.Join(c.dir, host+".key"), keyPEM, 0600); err != nil {
+		if err := atomicWrite(c.logger, filepath.Join(c.dir, host+".key"), keyPEM, 0600); err != nil {
 			c.logger.Warn().Err(err).Str("host", host).Msg("failed to write key to disk")
 			metrics.CertErrors.Inc()
 		}
@@ -310,7 +310,7 @@ func (c *CertStore) generateLeaf(host string) (tls.Certificate, error) {
 
 // atomicWrite writes data to a unique temp file then renames it to path.
 // Using a unique temp file name avoids race conditions under concurrent access.
-func atomicWrite(path string, data []byte, perm os.FileMode) error {
+func atomicWrite(logger zerolog.Logger, path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
@@ -319,17 +319,27 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
+		if cerr := tmp.Close(); cerr != nil {
+			logger.Warn().Err(cerr).Str("path", tmpName).Msg("close temp file failed during cleanup")
+		}
+		if rerr := os.Remove(tmpName); rerr != nil {
+			logger.Warn().Err(rerr).Str("path", tmpName).Msg("remove temp file failed during cleanup")
+		}
 		return err
 	}
 	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
+		if cerr := tmp.Close(); cerr != nil {
+			logger.Warn().Err(cerr).Str("path", tmpName).Msg("close temp file failed during cleanup")
+		}
+		if rerr := os.Remove(tmpName); rerr != nil {
+			logger.Warn().Err(rerr).Str("path", tmpName).Msg("remove temp file failed during cleanup")
+		}
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
+		if rerr := os.Remove(tmpName); rerr != nil {
+			logger.Warn().Err(rerr).Str("path", tmpName).Msg("remove temp file failed during cleanup")
+		}
 		return err
 	}
 	return os.Rename(tmpName, path)

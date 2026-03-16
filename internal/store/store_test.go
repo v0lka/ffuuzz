@@ -239,7 +239,7 @@ func TestAtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/test.txt"
 	data := []byte("test data")
-	if err := atomicWrite(path, data, 0644); err != nil {
+	if err := atomicWrite(zerolog.Nop(), path, data, 0644); err != nil {
 		t.Fatalf("atomicWrite: %v", err)
 	}
 	// Verify file contents
@@ -255,7 +255,7 @@ func TestAtomicWrite(t *testing.T) {
 func TestAtomicWrite_Permissions(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/secret.key"
-	if err := atomicWrite(path, []byte("secret"), 0600); err != nil {
+	if err := atomicWrite(zerolog.Nop(), path, []byte("secret"), 0600); err != nil {
 		t.Fatalf("atomicWrite: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -271,10 +271,10 @@ func TestAtomicWrite_Permissions(t *testing.T) {
 func TestAtomicWrite_Overwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/overwrite.txt"
-	if err := atomicWrite(path, []byte("first"), 0644); err != nil {
+	if err := atomicWrite(zerolog.Nop(), path, []byte("first"), 0644); err != nil {
 		t.Fatalf("first atomicWrite: %v", err)
 	}
-	if err := atomicWrite(path, []byte("second"), 0644); err != nil {
+	if err := atomicWrite(zerolog.Nop(), path, []byte("second"), 0644); err != nil {
 		t.Fatalf("second atomicWrite: %v", err)
 	}
 	got, _ := os.ReadFile(path)
@@ -562,7 +562,7 @@ func TestLoadOrCreateRoot_UnreadableCertFile(t *testing.T) {
 }
 
 func TestAtomicWrite_BadParentDir(t *testing.T) {
-	err := atomicWrite("/dev/null/cannot/write/here.txt", []byte("data"), 0644)
+	err := atomicWrite(zerolog.Nop(), "/dev/null/cannot/write/here.txt", []byte("data"), 0644)
 	if err == nil {
 		t.Fatal("expected error writing to non-existent directory")
 	}

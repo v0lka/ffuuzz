@@ -178,7 +178,7 @@ func (s *RecordingStore) List(ctx context.Context, limit, offset int, hostFilter
 		argIdx++
 	}
 	if pathPrefix != "" {
-		conditions = append(conditions, fmt.Sprintf("target_path LIKE $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("target_path LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, pathPrefix+"%")
 		argIdx++
 	}
@@ -219,7 +219,7 @@ func (s *RecordingStore) ListAll(ctx context.Context, hostFilter, pathPrefix str
 		argIdx++
 	}
 	if pathPrefix != "" {
-		conditions = append(conditions, fmt.Sprintf("target_path LIKE $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf("target_path LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, pathPrefix+"%")
 	}
 
@@ -307,6 +307,35 @@ func (s *RecordingStore) GetByID(ctx context.Context, id string, includeEntries 
 	}
 
 	return &sess, nil
+}
+
+// GetByIDs returns multiple recording sessions by their IDs.
+// This is more efficient than calling GetByID in a loop.
+func (s *RecordingStore) GetByIDs(ctx context.Context, ids []string) ([]model.RecordingSession, error) {
+	if len(ids) == 0 {
+		return []model.RecordingSession{}, nil
+	}
+
+	query, args, err := sqlx.In(
+		`SELECT id, schema_version, created_at, target_scheme, target_host, target_port, target_path, entry_count
+		 FROM recordings WHERE id IN (?)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	query = s.db.Rebind(query)
+
+	var rows []recordingRow
+	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, fmt.Errorf("get recordings by ids: %w", err)
+	}
+
+	sessions := make([]model.RecordingSession, len(rows))
+	for i, row := range rows {
+		sessions[i] = row.toModel()
+	}
+
+	return sessions, nil
 }
 
 // Delete removes a recording by ID. Returns true if a row was deleted.
@@ -461,7 +490,7 @@ func (s *RecordingStore) DeleteByPrefix(ctx context.Context, scheme, host string
 	baseWhere := `target_scheme = $1 AND target_host = $2 AND target_port = $3`
 	args := []interface{}{scheme, host, port}
 	if pathPrefix != "" {
-		baseWhere += ` AND target_path LIKE $4`
+		baseWhere += ` AND target_path LIKE $4 ESCAPE '\'`
 		args = append(args, pathPrefix+"%")
 	}
 
@@ -485,7 +514,10 @@ func (s *RecordingStore) DeleteByPrefix(ctx context.Context, scheme, host string
 	if err != nil {
 		return 0, fmt.Errorf("delete by prefix: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("rows affected unavailable for delete by prefix")
+	}
 	return n, nil
 }
 
@@ -551,7 +583,7 @@ func (s *RecordingStore) MergeRecordings(ctx context.Context, origin endpoint.Or
 	conditions := make([]string, 0, len(sourcePrefixes))
 	args := []interface{}{origin.Scheme, origin.Host, origin.Port}
 	for i, sp := range sourcePrefixes {
-		conditions = append(conditions, fmt.Sprintf("r.target_path LIKE $%d", 4+i))
+		conditions = append(conditions, fmt.Sprintf("r.target_path LIKE $%d ESCAPE '\\'", 4+i))
 		args = append(args, sp+"%")
 	}
 

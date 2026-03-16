@@ -24,6 +24,7 @@ import (
 // RecordingStore defines the recording operations needed by the API.
 type RecordingStore interface {
 	GetByID(ctx context.Context, id string, includeEntries bool, maxBodyBytes int) (*model.RecordingSession, error)
+	GetByIDs(ctx context.Context, ids []string) ([]model.RecordingSession, error)
 	Upsert(ctx context.Context, sess model.RecordingSession) (bool, error)
 	List(ctx context.Context, limit, offset int, hostFilter, pathPrefix string) ([]model.RecordingSession, error)
 	ListAll(ctx context.Context, hostFilter, pathPrefix string) ([]model.RecordingSession, error)
@@ -176,7 +177,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqID := c.GetHeader("X-Request-ID")
-		if reqID == "" {
+		if reqID == "" || !ValidateRequestID(reqID) {
 			reqID = httputil.NewRequestID()
 		}
 		c.Set("request_id", reqID)
@@ -273,21 +274,42 @@ func (s *Server) internalError(c *gin.Context, code string, err error) {
 }
 
 // parsePagination extracts limit and offset query parameters with defaults (50, 0).
-func parsePagination(c *gin.Context) (limit, offset int) {
-	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "50"))
-	offset, _ = strconv.Atoi(c.DefaultQuery("offset", "0"))
+// If parsing fails, defaults are used and a warning is logged.
+// Limit is capped at 50 to prevent OOM attacks.
+func (s *Server) parsePagination(c *gin.Context) (limit, offset int) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		s.logger.Warn().Err(err).Str("param", "limit").Msg("invalid pagination parameter, using default")
+		limit = 50
+	}
+	if limit > 50 {
+		s.logger.Warn().Int("limit", limit).Msg("pagination limit exceeds maximum, capping at 50")
+		limit = 50
+	}
+	offset, err = strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		s.logger.Warn().Err(err).Str("param", "offset").Msg("invalid pagination parameter, using default")
+		offset = 0
+	}
+	const maxOffset = 1_000_000
+	if offset > maxOffset {
+		s.logger.Warn().Int("offset", offset).Msg("pagination offset exceeds maximum, capping at 1000000")
+		offset = maxOffset
+	}
 	return limit, offset
 }
 
 // parseSinceParam extracts the "since" query parameter as an RFC3339 time.
-func parseSinceParam(c *gin.Context) *time.Time {
+// Returns (nil, nil) if the parameter is not present.
+// Returns (nil, error) if the parameter is present but has invalid format.
+func parseSinceParam(c *gin.Context) (*time.Time, error) {
 	sinceStr := c.Query("since")
 	if sinceStr == "" {
-		return nil
+		return nil, nil
 	}
 	t, err := time.Parse(time.RFC3339, sinceStr)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &t
+	return &t, nil
 }

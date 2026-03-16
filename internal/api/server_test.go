@@ -19,6 +19,7 @@ import (
 
 type mockRecordingStore struct {
 	getByIDFn                func(ctx context.Context, id string, includeEntries bool, maxBodyBytes int) (*model.RecordingSession, error)
+	getByIDsFn               func(ctx context.Context, ids []string) ([]model.RecordingSession, error)
 	upsertFn                 func(ctx context.Context, sess model.RecordingSession) (bool, error)
 	listFn                   func(ctx context.Context, limit, offset int, hostFilter, pathPrefix string) ([]model.RecordingSession, error)
 	listAllFn                func(ctx context.Context, hostFilter, pathPrefix string) ([]model.RecordingSession, error)
@@ -31,6 +32,12 @@ type mockRecordingStore struct {
 func (m *mockRecordingStore) GetByID(ctx context.Context, id string, includeEntries bool, maxBodyBytes int) (*model.RecordingSession, error) {
 	if m.getByIDFn != nil {
 		return m.getByIDFn(ctx, id, includeEntries, maxBodyBytes)
+	}
+	return nil, nil
+}
+func (m *mockRecordingStore) GetByIDs(ctx context.Context, ids []string) ([]model.RecordingSession, error) {
+	if m.getByIDsFn != nil {
+		return m.getByIDsFn(ctx, ids)
 	}
 	return nil, nil
 }
@@ -238,7 +245,7 @@ func TestListRecordings_WithData(t *testing.T) {
 
 func TestGetRecording_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/recordings/nonexistent", nil)
+	req := httptest.NewRequest("GET", "/api/v1/recordings/99999999-9999-9999-9999-999999999999", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -254,7 +261,7 @@ func TestGetRecording_Found(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/recordings/sess-1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -264,7 +271,7 @@ func TestGetRecording_Found(t *testing.T) {
 
 func TestDeleteRecording_Success(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("DELETE", "/api/v1/recordings/sess-1", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 204 {
@@ -280,7 +287,7 @@ func TestDeleteRecording_InUse(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("DELETE", "/api/v1/recordings/sess-1", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 409 {
@@ -296,7 +303,7 @@ func TestDeleteRecording_NotFound(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("DELETE", "/api/v1/recordings/nonexistent", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/99999999-9999-9999-9999-999999999999", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -416,7 +423,7 @@ func TestListCampaigns_WithData(t *testing.T) {
 
 func TestGetCampaign_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/nonexistent", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/99999999-9999-9999-9999-999999999999", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -432,7 +439,7 @@ func TestGetCampaign_Found(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -495,7 +502,7 @@ func TestCreateCampaign_RecordingNotFound(t *testing.T) {
 
 func TestGetCampaignStats_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stats", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -531,7 +538,7 @@ func TestGetCampaignStats_Found(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stats", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -541,7 +548,7 @@ func TestGetCampaignStats_Found(t *testing.T) {
 
 func TestGetCampaignConfig_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/config", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/config", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -560,7 +567,7 @@ func TestGetCampaignConfig_Found(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/config", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/config", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -572,7 +579,7 @@ func TestGetCampaignFindings_Empty(t *testing.T) {
 	srv := newTestServer(func(cfg *ServerConfig) {
 		cfg.Campaigns = campaignExistsStore()
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/findings", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/findings", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 204 {
@@ -589,7 +596,7 @@ func TestGetCampaignFindings_WithData(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/findings", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/findings", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -639,14 +646,18 @@ func TestListFindings_WithInvalidSince(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/findings?since=not-a-date", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
-	if w.Code != 204 {
-		t.Errorf("status = %d, want 204", w.Code)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_SINCE") {
+		t.Errorf("response body does not contain INVALID_SINCE error code: %s", body)
 	}
 }
 
 func TestGetFinding_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -662,7 +673,7 @@ func TestGetFinding_Found(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -672,7 +683,7 @@ func TestGetFinding_Found(t *testing.T) {
 
 func TestGetFindingArtifact_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1/artifact", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333/artifact", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -689,7 +700,7 @@ func TestGetFindingArtifact_FileReadError(t *testing.T) {
 		}
 		cfg.ArtifactDir = "/tmp/does-not-exist-ffuuzz"
 	})
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1/artifact", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333/artifact", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -699,7 +710,7 @@ func TestGetFindingArtifact_FileReadError(t *testing.T) {
 
 func TestReproduceFinding_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -716,7 +727,7 @@ func TestReproduceFinding_InvalidRuns(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":50}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":50}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -733,7 +744,7 @@ func TestReproduceFinding_AlreadyQueued(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -750,7 +761,7 @@ func TestReproduceFinding_Success(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -768,7 +779,7 @@ func TestReproduceFinding_DefaultRuns(t *testing.T) {
 		}
 	})
 	// Send body that fails binding so default runs=3 is used
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`not json`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`not json`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -789,9 +800,9 @@ func TestSpaHandler_NoWebFS(t *testing.T) {
 
 func TestSpaHandler_WithWebFS(t *testing.T) {
 	webFS := fstest.MapFS{
-		"index.html":        &fstest.MapFile{Data: []byte("<html></html>")},
-		"assets/app.js":     &fstest.MapFile{Data: []byte("console.log('hi')")},
-		"assets/style.css":  &fstest.MapFile{Data: []byte("body{}")},
+		"index.html":       &fstest.MapFile{Data: []byte("<html></html>")},
+		"assets/app.js":    &fstest.MapFile{Data: []byte("console.log('hi')")},
+		"assets/style.css": &fstest.MapFile{Data: []byte("body{}")},
 	}
 	srv := newTestServer(func(cfg *ServerConfig) {
 		cfg.WebFS = fs.FS(webFS)
@@ -926,7 +937,7 @@ func campaignExistsStore() *mockCampaignStore {
 
 func TestStartCampaign_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/start", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/start", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -942,7 +953,7 @@ func TestStartCampaign_AlreadyRunning(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/start", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/start", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 409 {
@@ -958,7 +969,7 @@ func TestStartCampaign_InvalidState(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/start", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/start", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 422 {
@@ -968,7 +979,7 @@ func TestStartCampaign_InvalidState(t *testing.T) {
 
 func TestStopCampaign_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/stop", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stop", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -984,7 +995,7 @@ func TestStopCampaign_NotRunning(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/stop", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stop", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 409 {
@@ -994,7 +1005,7 @@ func TestStopCampaign_NotRunning(t *testing.T) {
 
 func TestStreamCampaignStats_NotFound(t *testing.T) {
 	srv := newTestServer()
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stream", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stream", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 404 {
@@ -1016,7 +1027,7 @@ func TestStreamCampaignStats_TerminalStatus(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stream", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stream", nil)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1037,7 +1048,7 @@ func TestDeleteRecording_CheckError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("DELETE", "/api/v1/recordings/sess-1", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1094,7 +1105,7 @@ func TestGetRecording_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/recordings/r1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1126,7 +1137,7 @@ func TestGetCampaign_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1143,7 +1154,7 @@ func TestGetCampaignFindings_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/findings", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/findings", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1175,7 +1186,7 @@ func TestGetFinding_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1191,7 +1202,7 @@ func TestGetFindingArtifact_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1/artifact", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333/artifact", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1210,7 +1221,7 @@ func TestReproduceFinding_UpdateError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1268,7 +1279,7 @@ func TestDeleteRecording_DeleteError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("DELETE", "/api/v1/recordings/r1", nil)
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/22222222-2222-2222-2222-222222222222", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1284,7 +1295,7 @@ func TestGetCampaignStats_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stats", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1300,7 +1311,7 @@ func TestGetCampaignConfig_Error(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/config", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/config", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1366,6 +1377,22 @@ func TestParsePagination_Custom(t *testing.T) {
 	srv.router.ServeHTTP(w, req)
 }
 
+func TestParsePagination_LimitCap(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Recordings = &mockRecordingStore{
+			listFn: func(ctx context.Context, limit, offset int, hostFilter, pathPrefix string) ([]model.RecordingSession, error) {
+				if limit != 50 {
+					t.Errorf("limit = %d, want 50 (capped)", limit)
+				}
+				return nil, nil
+			},
+		}
+	})
+	req := httptest.NewRequest("GET", "/api/v1/recordings?limit=5000", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+}
+
 func TestMetricsEndpoint(t *testing.T) {
 	srv := newTestServer()
 	req := httptest.NewRequest("GET", "/metrics", nil)
@@ -1391,7 +1418,7 @@ func TestGetFindingArtifact_Success(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/findings/f1/artifact", nil)
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333/artifact", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -1413,7 +1440,7 @@ func TestGetRecording_WithIncludeEntries(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/recordings/r1?include_entries=true&max_body_bytes=1024", nil)
+	req := httptest.NewRequest("GET", "/api/v1/recordings/22222222-2222-2222-2222-222222222222?include_entries=true&max_body_bytes=1024", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -1436,11 +1463,27 @@ func TestGetCampaignFindings_WithFilters(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/findings?type=TIMEOUT&status=CONFIRMED", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/findings?type=TIMEOUT&status=CONFIRMED", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestGetCampaignFindings_WithInvalidSince(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Campaigns = campaignExistsStore()
+	})
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/findings?since=invalid-date", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_SINCE") {
+		t.Errorf("response body does not contain INVALID_SINCE error code: %s", body)
 	}
 }
 
@@ -1452,7 +1495,7 @@ func TestReproduceFinding_AlreadyRunning(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1469,7 +1512,7 @@ func TestReproduceFinding_GetError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/findings/f1/reproduce", strings.NewReader(`{"runs":3}`))
+	req := httptest.NewRequest("POST", "/api/v1/findings/33333333-3333-3333-3333-333333333333/reproduce", strings.NewReader(`{"runs":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1486,7 +1529,7 @@ func TestStartCampaign_GetError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/start", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/start", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1502,7 +1545,7 @@ func TestStopCampaign_GetError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/stop", nil)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stop", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1518,7 +1561,7 @@ func TestStreamCampaignStats_GetError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stream", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stream", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1539,7 +1582,7 @@ func TestGetCampaignStats_FindingsError(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stats", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 500 {
@@ -1572,7 +1615,7 @@ func TestGetCampaignStats_AllFindingTypes(t *testing.T) {
 			},
 		}
 	})
-	req := httptest.NewRequest("GET", "/api/v1/campaigns/c1/stats", nil)
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
@@ -1823,7 +1866,7 @@ func TestDeleteRecordingsByPrefix_OK(t *testing.T) {
 func TestAddRecordingsToCampaign_NotFound(t *testing.T) {
 	srv := newTestServer()
 	body := strings.NewReader(`{"scheme":"http","host":"a.com","port":80}`)
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/recordings", body)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1841,7 +1884,7 @@ func TestAddRecordingsToCampaign_ActiveCampaign(t *testing.T) {
 		}
 	})
 	body := strings.NewReader(`{"scheme":"http","host":"a.com","port":80}`)
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/recordings", body)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1862,7 +1905,7 @@ func TestAddRecordingsToCampaign_OK(t *testing.T) {
 		}
 	})
 	body := strings.NewReader(`{"scheme":"http","host":"a.com","port":80}`)
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/recordings", body)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
@@ -1874,11 +1917,207 @@ func TestAddRecordingsToCampaign_OK(t *testing.T) {
 func TestAddRecordingsToCampaign_InvalidBody(t *testing.T) {
 	srv := newTestServer()
 	body := strings.NewReader(`not json`)
-	req := httptest.NewRequest("POST", "/api/v1/campaigns/c1/recordings", body)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 400 {
 		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- Negative validation tests ---
+
+func TestGetCampaign_InvalidUUID(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_ID") {
+		t.Errorf("expected INVALID_ID in body: %s", body)
+	}
+}
+
+func TestGetRecording_InvalidUUID(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/recordings/not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestGetFinding_InvalidUUID(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/findings/not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestGetFindingArtifact_PathTraversal(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.ArtifactDir = "/tmp/safe-dir"
+		cfg.Artifacts = &mockArtifactStore{
+			getByFindingIDFn: func(ctx context.Context, findingID string) (*model.Artifact, error) {
+				return &model.Artifact{ID: "a1", FilePath: "../../etc/passwd"}, nil
+			},
+		}
+	})
+	req := httptest.NewRequest("GET", "/api/v1/findings/33333333-3333-3333-3333-333333333333/artifact", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_PATH") {
+		t.Errorf("expected INVALID_PATH in body: %s", body)
+	}
+}
+
+func TestListCampaigns_InvalidStatus(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/campaigns?status=BOGUS", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_STATUS") {
+		t.Errorf("expected INVALID_STATUS in body: %s", body)
+	}
+}
+
+func TestListFindings_InvalidType(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/findings?type=BOGUS", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_TYPE") {
+		t.Errorf("expected INVALID_TYPE in body: %s", body)
+	}
+}
+
+func TestListFindings_InvalidCampaignID(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("GET", "/api/v1/findings?campaign_id=not-uuid", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_CAMPAIGN_ID") {
+		t.Errorf("expected INVALID_CAMPAIGN_ID in body: %s", body)
+	}
+}
+
+func TestDeleteRecordingsByPrefix_InvalidScheme(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/by-prefix?scheme=ftp&host=a.com&port=80", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_SCHEME") {
+		t.Errorf("expected INVALID_SCHEME in body: %s", body)
+	}
+}
+
+func TestDeleteRecordingsByPrefix_InvalidPortRange(t *testing.T) {
+	srv := newTestServer()
+	req := httptest.NewRequest("DELETE", "/api/v1/recordings/by-prefix?scheme=http&host=a.com&port=99999", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "INVALID_PORT") {
+		t.Errorf("expected INVALID_PORT in body: %s", body)
+	}
+}
+
+func TestCreateCampaign_NameTooLong(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Recordings = &mockRecordingStore{
+			getByIDFn: func(ctx context.Context, id string, _ bool, _ int) (*model.RecordingSession, error) {
+				return &model.RecordingSession{ID: id}, nil
+			},
+		}
+	})
+	longName := strings.Repeat("a", 300)
+	body := `{"name":"` + longName + `","recording_ids":["r1"],"config":{"target":{"base_url":"http://localhost"},"limits":{"workers":2,"rps":10,"req_timeout_ms":5000,"max_tests":100},"mutations":{"intensity":0.5}}}`
+	req := httptest.NewRequest("POST", "/api/v1/campaigns", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	respBody := w.Body.String()
+	if !strings.Contains(respBody, "NAME_TOO_LONG") {
+		t.Errorf("expected NAME_TOO_LONG in body: %s", respBody)
+	}
+}
+
+func TestAddRecordingsToCampaign_InvalidScheme(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Campaigns = campaignExistsStore()
+	})
+	body := strings.NewReader(`{"scheme":"ftp","host":"a.com","port":80}`)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAddRecordingsToCampaign_InvalidPort(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Campaigns = campaignExistsStore()
+	})
+	body := strings.NewReader(`{"scheme":"http","host":"a.com","port":99999}`)
+	req := httptest.NewRequest("POST", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/recordings", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCreateCampaign_InvalidBaseURLScheme(t *testing.T) {
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Recordings = &mockRecordingStore{
+			getByIDFn: func(ctx context.Context, id string, _ bool, _ int) (*model.RecordingSession, error) {
+				return &model.RecordingSession{ID: id}, nil
+			},
+		}
+	})
+	body := `{"name":"test","recording_ids":["r1"],"config":{"target":{"base_url":"ftp://evil.com"},"limits":{"workers":2,"rps":10,"req_timeout_ms":5000,"max_tests":100},"mutations":{"intensity":0.5}}}`
+	req := httptest.NewRequest("POST", "/api/v1/campaigns", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 422 {
+		t.Errorf("status = %d, want 422", w.Code)
 	}
 }

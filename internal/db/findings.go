@@ -119,8 +119,10 @@ func (s *FindingStore) Create(ctx context.Context, f model.Finding) error {
 // loadArtifactID returns the artifact ID for a finding, or empty string if none.
 func (s *FindingStore) loadArtifactID(ctx context.Context, findingID string) string {
 	var artifactID sql.NullString
-	_ = s.db.GetContext(ctx, &artifactID,
-		`SELECT id FROM artifacts WHERE finding_id = $1 LIMIT 1`, findingID)
+	if err := s.db.GetContext(ctx, &artifactID,
+		`SELECT id FROM artifacts WHERE finding_id = $1 LIMIT 1`, findingID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		s.logger.Warn().Err(err).Str("finding_id", findingID).Msg("load artifact ID failed")
+	}
 	if artifactID.Valid {
 		return artifactID.String
 	}
@@ -307,15 +309,16 @@ func (s *FindingStore) ClaimNextReproduceJob(ctx context.Context) (string, int, 
 	var result claimResult
 	err := s.db.GetContext(ctx, &result,
 		`UPDATE findings
-		 SET reproduce_status = 'RUNNING'
+		 SET reproduce_status = $1
 		 WHERE id = (
 			SELECT id FROM findings
-			WHERE reproduce_status = 'ENQUEUED'
+			WHERE reproduce_status = $2
 			ORDER BY reproduce_enqueued_at ASC
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
 		 )
-		 RETURNING id, reproduce_runs`)
+		 RETURNING id, reproduce_runs`,
+		string(model.ReproduceRunning), string(model.ReproduceEnqueued))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", 0, false, nil

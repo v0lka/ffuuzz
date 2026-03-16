@@ -91,7 +91,7 @@ func EncodeBodyToBase64(b []byte) string {
 
 // TxRecordToExchange converts a TxRecord to a model.Exchange.
 func TxRecordToExchange(tx TxRecord) model.Exchange {
-	u, _ := url.Parse(tx.URL)
+	u, _ := url.Parse(tx.URL) //nolint:errcheck // nil u is handled below
 	path := ""
 	query := ""
 	if u != nil {
@@ -176,9 +176,6 @@ func NewDBRecorder(store RecordingInserter, resolver *endpoint.Resolver, logger 
 }
 
 func (d *DBRecorder) Record(tx *TxRecord) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	// Parse URL to extract target info
 	u, err := url.Parse(tx.URL)
 	if err != nil {
@@ -197,7 +194,11 @@ func (d *DBRecorder) Record(tx *TxRecord) error {
 	}
 	port := 80
 	if u.Port() != "" {
-		port, _ = strconv.Atoi(u.Port())
+		port, err = strconv.Atoi(u.Port())
+		if err != nil {
+			d.logger.Warn().Err(err).Str("url", tx.URL).Str("port", u.Port()).Msg("failed to parse port from URL, using default")
+			port = 80
+		}
 	} else if scheme == "https" {
 		port = 443
 	}

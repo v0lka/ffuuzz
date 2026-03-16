@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,11 @@ func (s *Server) createCampaign(c *gin.Context) {
 
 	if len(req.RecordingIDs) == 0 {
 		errorResponse(c, http.StatusBadRequest, "NO_RECORDINGS", "recording_ids must not be empty")
+		return
+	}
+
+	if !validateStringLen(req.Name, 255) {
+		errorResponse(c, http.StatusBadRequest, "NAME_TOO_LONG", "name must not exceed 255 characters")
 		return
 	}
 
@@ -79,7 +85,10 @@ func (s *Server) createCampaign(c *gin.Context) {
 }
 
 func (s *Server) startCampaign(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
 	if err != nil {
@@ -113,7 +122,10 @@ func (s *Server) startCampaign(c *gin.Context) {
 }
 
 func (s *Server) stopCampaign(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
 	if err != nil {
@@ -140,8 +152,12 @@ func (s *Server) stopCampaign(c *gin.Context) {
 }
 
 func (s *Server) listCampaigns(c *gin.Context) {
-	limit, offset := parsePagination(c)
+	limit, offset := s.parsePagination(c)
 	status := c.Query("status")
+	if !validateEnumParam(status, validCampaignStatuses) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_STATUS", "status must be one of: CREATED, STARTING, RUNNING, STOPPING, STOPPED, FINISHED, FAILED")
+		return
+	}
 
 	campaigns, err := s.campaigns.List(c.Request.Context(), status, limit, offset)
 	if err != nil {
@@ -158,7 +174,10 @@ func (s *Server) listCampaigns(c *gin.Context) {
 }
 
 func (s *Server) getCampaign(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
 	if err != nil {
@@ -174,7 +193,10 @@ func (s *Server) getCampaign(c *gin.Context) {
 }
 
 func (s *Server) getCampaignStats(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	stats, err := s.buildCampaignStats(c.Request.Context(), id)
 	if err != nil {
@@ -228,23 +250,23 @@ func (s *Server) buildCampaignStats(ctx context.Context, id string) (*model.Camp
 	stats.Seeds.SessionsTotal = len(campaign.RecordingIDs)
 
 	// Compute seeds.sessions_used and seeds.exchanges_sent from recording data
-	sessionsUsed := 0
-	exchangesSent := 0
-	for _, rid := range campaign.RecordingIDs {
-		sess, err := s.recordings.GetByID(ctx, rid, false, 0)
-		if err == nil && sess != nil {
-			sessionsUsed++
-			exchangesSent += sess.EntryCount
-		}
+	sessions, err := s.recordings.GetByIDs(ctx, campaign.RecordingIDs)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to get recordings for stats")
 	}
-	stats.Seeds.SessionsUsed = sessionsUsed
-	stats.Seeds.ExchangesSent = exchangesSent
+	stats.Seeds.SessionsUsed = len(sessions)
+	for _, sess := range sessions {
+		stats.Seeds.ExchangesSent += sess.EntryCount
+	}
 
 	return &stats, nil
 }
 
 func (s *Server) getCampaignFindings(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	// Verify campaign exists
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
@@ -257,10 +279,22 @@ func (s *Server) getCampaignFindings(c *gin.Context) {
 		return
 	}
 
-	limit, offset := parsePagination(c)
+	limit, offset := s.parsePagination(c)
 	typeFilter := c.Query("type")
+	if !validateEnumParam(typeFilter, validFindingTypes) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_TYPE", "type must be one of: TIMEOUT, SERVER_ERROR, LATENCY_REGRESSION, REGEX_MATCH")
+		return
+	}
 	statusFilter := c.Query("status")
-	since := parseSinceParam(c)
+	if !validateEnumParam(statusFilter, validFindingStatuses) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_STATUS", "status must be one of: UNCONFIRMED, CONFIRMED")
+		return
+	}
+	since, err := parseSinceParam(c)
+	if err != nil {
+		errorResponse(c, http.StatusBadRequest, "INVALID_SINCE", "invalid since parameter: expected RFC3339 format")
+		return
+	}
 
 	findings, err := s.findings.ListAll(c.Request.Context(), id, typeFilter, statusFilter, since, limit, offset)
 	if err != nil {
@@ -278,8 +312,12 @@ func (s *Server) getCampaignFindings(c *gin.Context) {
 
 // validateCampaignConfig checks that campaign config parameters are logically valid.
 func validateCampaignConfig(cfg model.CampaignConfig) error {
-	if cfg.Target.BaseURL == "" {
-		return fmt.Errorf("target.base_url must not be empty")
+	u, err := url.Parse(cfg.Target.BaseURL)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("target.base_url must be a valid URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("target.base_url scheme must be http or https")
 	}
 	if cfg.Limits.Workers <= 0 {
 		return fmt.Errorf("limits.workers must be > 0")
@@ -307,11 +345,27 @@ type addRecordingsRequest struct {
 }
 
 func (s *Server) addRecordingsToCampaign(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	var req addRecordingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errorResponse(c, http.StatusBadRequest, "INVALID_BODY", err.Error())
+		return
+	}
+
+	if !validateScheme(req.Scheme) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_SCHEME", "scheme must be http or https")
+		return
+	}
+	if !validatePort(req.Port) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PORT", "port must be between 1 and 65535")
+		return
+	}
+	if !validateStringLen(req.Host, 253) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_HOST", "host must not exceed 253 characters")
 		return
 	}
 
@@ -330,7 +384,7 @@ func (s *Server) addRecordingsToCampaign(c *gin.Context) {
 		return
 	}
 
-	added, err := s.campaigns.AddRecordingsByFilter(c.Request.Context(), id, req.Scheme, req.Host, req.Port, req.PathPrefix)
+	added, err := s.campaigns.AddRecordingsByFilter(c.Request.Context(), id, req.Scheme, req.Host, req.Port, escapeLikePattern(req.PathPrefix))
 	if err != nil {
 		s.internalError(c, "ADD_RECORDINGS_FAILED", err)
 		return

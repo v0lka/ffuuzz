@@ -8,7 +8,10 @@ import (
 
 // getCampaignConfig returns the configuration of a campaign.
 func (s *Server) getCampaignConfig(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
 
 	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
 	if err != nil {

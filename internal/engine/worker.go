@@ -215,7 +215,9 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 
 	// Increment test counter
 	metrics.TestsTotal.Inc()
-	_ = w.campaigns.IncrementStats(ctx, w.campaignID, 1, 0)
+	if err := w.campaigns.IncrementStats(ctx, w.campaignID, 1, 0); err != nil {
+		w.logger.Warn().Err(err).Str("campaign_id", w.campaignID).Msg("increment test stats failed")
+	}
 }
 
 // buildResponseData converts replay result to model.ResponseData for artifact storage.
@@ -282,7 +284,9 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 	}
 
 	metrics.FindingsTotal.WithLabelValues(string(hit.Type)).Inc()
-	_ = w.campaigns.IncrementStats(ctx, w.campaignID, 0, 1)
+	if err := w.campaigns.IncrementStats(ctx, w.campaignID, 0, 1); err != nil {
+		w.logger.Warn().Err(err).Str("campaign_id", w.campaignID).Msg("increment finding stats failed")
+	}
 
 	// Write artifact
 	w.writeArtifact(ctx, findingID, session, hit, seed, ops)

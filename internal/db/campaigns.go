@@ -252,7 +252,7 @@ func (s *CampaignStore) AddRecordingsByFilter(ctx context.Context, campaignID, s
 			INSERT INTO campaign_recordings (campaign_id, recording_id)
 			SELECT $1, r.id FROM recordings r
 			WHERE r.target_scheme = $2 AND r.target_host = $3 AND r.target_port = $4
-			  AND r.target_path LIKE $5
+			  AND r.target_path LIKE $5 ESCAPE '\'
 			ON CONFLICT (campaign_id, recording_id) DO NOTHING`,
 			campaignID, scheme, host, port, pathPrefix+"%")
 	} else {
@@ -268,6 +268,9 @@ func (s *CampaignStore) AddRecordingsByFilter(ctx context.Context, campaignID, s
 		return 0, fmt.Errorf("add recordings by filter: %w", err)
 	}
 
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("rows affected unavailable for add recordings by filter")
+	}
 	return int(n), nil
 }
