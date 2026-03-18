@@ -1,0 +1,39 @@
+name: Generate code coverage badge
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required for pushing changes
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run Tests
+        run: |
+          go test -v ./... -covermode=count -coverprofile=coverage.out
+          go tool cover -func=coverage.out -o=coverage.out
+
+      - name: Go Coverage Badge
+        uses: tj-actions/coverage-badge-go@v3
+        with:
+          filename: coverage.out
+
+      - name: Commit changes
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore: Updated coverage badge."
+          file_pattern: README.md

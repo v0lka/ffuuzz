@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend
+web/node_modules/
+
+# Build output
+/ffuuzz
+
+# Project artifacts
+log.jsonl
+artifacts/
+
+# Shell scripts in repository root only
+/*.sh

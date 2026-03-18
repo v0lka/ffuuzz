@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS artifacts;
+DROP TABLE IF EXISTS findings;
+DROP TABLE IF EXISTS campaign_recordings;
+DROP TABLE IF EXISTS campaigns;
+DROP TABLE IF EXISTS exchanges;
+DROP TABLE IF EXISTS recordings;

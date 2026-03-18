@@ -1,0 +1,2 @@
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS mutation_type TEXT;
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS mutation_payload TEXT;
