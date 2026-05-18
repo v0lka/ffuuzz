@@ -85,6 +85,7 @@ func (j *jsonl) Close() error {
 	return err
 }
 
+// EncodeBodyToBase64 encodes a byte slice as a standard base64 string.
 func EncodeBodyToBase64(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
 }

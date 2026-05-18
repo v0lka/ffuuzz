@@ -3,10 +3,12 @@ package diff
 
 import "ffuuzz/internal/recorder"
 
+// FieldDiff describes a single field-level difference between two recorded
+// transactions.
 type FieldDiff struct {
-	Field string      `json:"field"`
-	Old   interface{} `json:"old"`
-	New   interface{} `json:"new"`
+	Field string `json:"field"`
+	Old   any    `json:"old"`
+	New   any    `json:"new"`
 }
 
 // TxDiff describes the differences between two recorded transactions.
@@ -16,6 +18,8 @@ type TxDiff struct {
 	Diffs      []FieldDiff `json:"diffs"`
 }
 
+// DiffTxRecords computes the structural differences between two recorded
+// transactions.
 func DiffTxRecords(a, b recorder.TxRecord) TxDiff {
 	res := TxDiff{
 		RequestIDA: a.RequestID,

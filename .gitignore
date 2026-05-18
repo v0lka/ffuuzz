@@ -43,3 +43,7 @@ artifacts/
 
 # Shell scripts in repository root only
 /*.sh
+
+.qoder/
+.agents/
+skills-lock.json

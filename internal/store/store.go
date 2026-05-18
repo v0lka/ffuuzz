@@ -26,6 +26,8 @@ import (
 	"ffuuzz/internal/metrics"
 )
 
+// CertStore manages TLS certificate generation, caching, and persistence.
+// It maintains an LRU cache of leaf certificates and a root CA for signing them.
 type CertStore struct {
 	dir        string
 	memOnly    bool
@@ -42,6 +44,8 @@ type CertStore struct {
 	sfGroup    singleflight.Group
 }
 
+// NewCertStore creates a CertStore, loading or generating a root CA certificate.
+// It initializes the LRU cache and optionally persists certificates to disk.
 func NewCertStore(cfg config.CertCacheConfig, tlsCfg config.TLSConfig, logger zerolog.Logger) (*CertStore, error) {
 	if cfg.CertDir == "" && !cfg.MemoryOnly {
 		return nil, errors.New("cert_dir required when memory_only is false")

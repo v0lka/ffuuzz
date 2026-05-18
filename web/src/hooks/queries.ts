@@ -22,24 +22,24 @@ import * as healthApi from "@/api/health";
 export const queryKeys = {
     recordings: {
         all: ["recordings"] as const,
-        list: (params?: Record<string, unknown>) =>
+        list: <T extends Record<string, unknown> = Record<string, unknown>>(params?: T) =>
             ["recordings", "list", params] as const,
         detail: (id: string) => ["recordings", "detail", id] as const,
         tree: ["recordings", "tree"] as const,
     },
     campaigns: {
         all: ["campaigns"] as const,
-        list: (params?: Record<string, unknown>) =>
+        list: <T extends Record<string, unknown> = Record<string, unknown>>(params?: T) =>
             ["campaigns", "list", params] as const,
         detail: (id: string) => ["campaigns", "detail", id] as const,
         stats: (id: string) => ["campaigns", "stats", id] as const,
         config: (id: string) => ["campaigns", "config", id] as const,
-        findings: (id: string, params?: Record<string, unknown>) =>
+        findings: <T extends Record<string, unknown> = Record<string, unknown>>(id: string, params?: T) =>
             ["campaigns", "findings", id, params] as const,
     },
     findings: {
         all: ["findings"] as const,
-        list: (params?: Record<string, unknown>) =>
+        list: <T extends Record<string, unknown> = Record<string, unknown>>(params?: T) =>
             ["findings", "list", params] as const,
         detail: (id: string) => ["findings", "detail", id] as const,
         artifact: (id: string) => ["findings", "artifact", id] as const,

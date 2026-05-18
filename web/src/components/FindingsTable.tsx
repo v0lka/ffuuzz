@@ -1,45 +1,14 @@
 import { Link } from "react-router-dom";
 import { FindingStatusBadge, TruncatedEndpoint, findingTypeColors } from "@/components/StatusBadge";
 import { TimeAgo } from "@/components/TimeAgo";
-import type { Finding, FindingType } from "@/types/api";
+import { truncateMiddle, formatMutationType, findingTypeLabels } from "@/utils/formatting";
+import type { Finding } from "@/types/api";
 
 interface FindingsTableProps {
     findings: Finding[];
     showCampaign?: boolean;
     campaignNames?: Map<string, string>;
 }
-
-/**
- * Truncates a string in the middle with ellipsis if it exceeds maxLen.
- */
-function truncateMiddle(str: string, maxLen: number): string {
-    if (str.length <= maxLen) return str;
-    const half = Math.floor((maxLen - 1) / 2);
-    return str.slice(0, half) + "…" + str.slice(-half);
-}
-
-/**
- * Truncates a mutation type string for display.
- * Shows only the last part after the colon (e.g., "json:string_mutation" -> "string_mutation").
- */
-function formatMutationType(mutationType: string | undefined): string {
-    if (!mutationType) return "-";
-    const parts = mutationType.split(":");
-    if (parts.length > 1) {
-        return parts[parts.length - 1] ?? mutationType;
-    }
-    return mutationType;
-}
-
-/**
- * Maps FindingType to a short single-word display label.
- */
-const findingTypeLabels: Record<FindingType, string> = {
-    TIMEOUT: "TIMEOUT",
-    SERVER_ERROR: "5xx",
-    LATENCY_REGRESSION: "LATENCY",
-    REGEX_MATCH: "REGEX",
-};
 
 /**
  * Shared findings table component used by both FindingsPage and CampaignDetailPage.

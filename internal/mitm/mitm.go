@@ -65,7 +65,8 @@ func (p *Proxy) ListenAndServe() (*http.Server, error) {
 	return p.server, p.server.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the proxy server.
+// Shutdown gracefully shuts down the proxy server. It is safe to call even
+// if the server was never started.
 func (p *Proxy) Shutdown(ctx context.Context) error {
 	if p.server != nil {
 		return p.server.Shutdown(ctx)
@@ -242,7 +243,9 @@ func (p *Proxy) mitmHTTPS(clientConn net.Conn, host string, connectReqID string)
 	}
 
 	// Reset deadline after successful handshake
-	_ = tlsConn.SetDeadline(time.Time{})
+	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+		p.logger.Debug().Err(err).Str("host", host).Msg("reset deadline failed")
+	}
 
 	srv := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

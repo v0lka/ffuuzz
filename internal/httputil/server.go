@@ -15,6 +15,7 @@ type ServerParams struct {
 	IdleTimeout       time.Duration
 }
 
+// NewHTTPServer creates an *http.Server from the given parameters.
 func NewHTTPServer(p ServerParams) *http.Server {
 	return &http.Server{
 		Addr:              p.Addr,

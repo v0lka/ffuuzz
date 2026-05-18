@@ -85,7 +85,10 @@ func (m *URIMutator) mutatePathSegments(ex model.Exchange, rng *rand.Rand) model
 }
 
 func (m *URIMutator) mutateQueryParams(ex model.Exchange, rng *rand.Rand) model.Exchange {
-	params, _ := url.ParseQuery(ex.Request.Query)
+	params, err := url.ParseQuery(ex.Request.Query)
+	if err != nil {
+		params = url.Values{}
+	}
 
 	op := rng.Intn(4)
 	switch op {
@@ -181,6 +184,8 @@ func (m *URIMutator) longValue(ex model.Exchange, rng *rand.Rand) model.Exchange
 	return ex
 }
 
+// randomString returns a random alphanumeric string of length n using the
+// given RNG to select characters.
 func randomString(rng *rand.Rand, n int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)

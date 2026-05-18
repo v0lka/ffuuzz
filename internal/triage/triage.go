@@ -30,6 +30,7 @@ var (
 // Triager handles deduplication, confirmation, and minimization of findings.
 type Triager struct{}
 
+// NewTriager creates a new Triager.
 func NewTriager() *Triager {
 	return &Triager{}
 }
@@ -236,11 +237,13 @@ func HasJSONBody(ex model.Exchange) bool {
 	if err != nil {
 		return false
 	}
-	var obj map[string]interface{}
+	var obj map[string]any
 	return json.Unmarshal(raw, &obj) == nil
 }
 
 // cloneSessionWithBody returns a copy of session with the body at exchangeIdx replaced.
+// Note: shallow-copies the session struct, relying on an explicit deep-copy of Entries.
+// If RecordingSession gains pointer/slice fields in the future, they must be deep-copied here.
 func cloneSessionWithBody(session model.RecordingSession, idx int, bodyB64 string) model.RecordingSession {
 	cloned := session
 	cloned.Entries = make([]model.Exchange, len(session.Entries))
@@ -278,7 +281,7 @@ func (t *Triager) MinimizeJSONBody(
 		return nil, nil
 	}
 
-	var obj map[string]interface{}
+	var obj map[string]any
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, nil
 	}

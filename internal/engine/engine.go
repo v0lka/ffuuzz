@@ -54,9 +54,10 @@ type Engine struct {
 	running map[string]context.CancelFunc // campaignID -> cancel
 
 	reproduceCancel context.CancelFunc
-	reproduceWg     sync.WaitGroup
+	reproduceWG     sync.WaitGroup
 }
 
+// NewEngine creates an Engine with the given stores, corpus, artifact directory, and logger.
 func NewEngine(
 	campaigns CampaignStore,
 	findings FindingStore,
@@ -121,13 +122,21 @@ func (e *Engine) StartCampaign(ctx context.Context, campaign *model.Campaign) er
 
 	// Transition STARTING -> RUNNING
 	ok, err = e.campaigns.UpdateStatus(ctx, campaign.ID, model.CampaignStarting, model.CampaignRunning)
-	if err != nil || !ok {
+	if err != nil {
 		cancel()
 		e.mu.Lock()
 		delete(e.running, campaign.ID)
 		e.mu.Unlock()
 		e.failCampaign(ctx, campaign.ID, model.CampaignStarting, fmt.Errorf("transition to RUNNING failed: %w", err))
 		return fmt.Errorf("update status to RUNNING: %w", err)
+	}
+	if !ok {
+		cancel()
+		e.mu.Lock()
+		delete(e.running, campaign.ID)
+		e.mu.Unlock()
+		e.failCampaign(ctx, campaign.ID, model.CampaignStarting, fmt.Errorf("campaign not in STARTING state"))
+		return fmt.Errorf("campaign %s is not in STARTING state", campaign.ID)
 	}
 
 	cfg := campaign.Config
@@ -198,20 +207,20 @@ func (e *Engine) runCampaign(
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		w := NewWorker(WorkerConfig{
-			ID:           i,
-			CampaignID:   campaignID,
-			BaseURL:      cfg.Target.BaseURL,
-			Pipeline:     pipeline,
-			SeqMutator:   seqMutator,
-			Detector:     detector,
-			Triager:      triager,
-			Replayer:     rep,
-			Findings:     e.findings,
-			Artifacts:    e.artifacts,
-			Campaigns:    e.campaigns,
-			ArtifactDir:  e.artifactDir,
-			AnomalyCfg:   cfg.Anomaly,
-			TriageCfg:    cfg.Triage,
+			ID:              i,
+			CampaignID:      campaignID,
+			BaseURL:         cfg.Target.BaseURL,
+			Pipeline:        pipeline,
+			SeqMutator:      seqMutator,
+			Detector:        detector,
+			Triager:         triager,
+			Replayer:        rep,
+			Findings:        e.findings,
+			Artifacts:       e.artifacts,
+			Campaigns:       e.campaigns,
+			ArtifactDir:     e.artifactDir,
+			AnomalyCfg:      cfg.Anomaly,
+			TriageCfg:       cfg.Triage,
 			Baselines:       baselines,
 			ReqTimeoutMs:    cfg.Limits.ReqTimeoutMs,
 			ExtractionRules: extractionRules,
@@ -339,7 +348,7 @@ func (e *Engine) StopAll(ctx context.Context) {
 
 	if reproduceCancel != nil {
 		reproduceCancel()
-		e.reproduceWg.Wait()
+		e.reproduceWG.Wait()
 	}
 
 	e.mu.Lock()
@@ -380,11 +389,11 @@ func (e *Engine) StartReproduceWorker(ctx context.Context) {
 	e.reproduceCancel = cancel
 	e.mu.Unlock()
 
-	e.reproduceWg.Add(1)
+	e.reproduceWG.Add(1)
 
 	w := NewReproduceWorker(e.findings, e.artifacts, e.artifactDir, e.logger)
 	go func() {
-		defer e.reproduceWg.Done()
+		defer e.reproduceWG.Done()
 		w.Run(rCtx)
 	}()
 }

@@ -5,6 +5,7 @@ package config
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -41,6 +42,8 @@ type Config struct {
 	CertCache       CertCacheConfig `json:"cert_cache"`
 }
 
+// DefaultConfig returns a Config populated with safe defaults that work for local
+// development.
 func DefaultConfig() *Config {
 	return &Config{
 		APIAddress:      ":8081",
@@ -52,7 +55,7 @@ func DefaultConfig() *Config {
 		Workers:         8,
 		RPS:             50,
 		MaxBodyBytes:    64 * 1024,
-		TLSSkipVerify: true,
+		TLSSkipVerify:   true,
 		TLS: TLSConfig{
 			MinVersion:       tls.VersionTLS12,
 			HandshakeTimeout: 10 * time.Second,
@@ -83,27 +86,37 @@ func Load(args []string) (*Config, error) {
 		cfg.ArtifactDir = v
 	}
 	if v := os.Getenv("FFUUZZ_REQ_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_REQ_TIMEOUT=%q: %v\n", v, err)
+		} else {
 			cfg.ReqTimeout = d
 		}
 	}
 	if v := os.Getenv("FFUUZZ_SHUTDOWN_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_SHUTDOWN_TIMEOUT=%q: %v\n", v, err)
+		} else {
 			cfg.ShutdownTimeout = d
 		}
 	}
 	if v := os.Getenv("FFUUZZ_WORKERS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := strconv.Atoi(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_WORKERS=%q: %v\n", v, err)
+		} else if n > 0 {
 			cfg.Workers = n
 		}
 	}
 	if v := os.Getenv("FFUUZZ_RPS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := strconv.Atoi(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_RPS=%q: %v\n", v, err)
+		} else if n > 0 {
 			cfg.RPS = n
 		}
 	}
 	if v := os.Getenv("FFUUZZ_TLS_SKIP_VERIFY"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
+		if b, err := strconv.ParseBool(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_TLS_SKIP_VERIFY=%q: %v\n", v, err)
+		} else {
 			cfg.TLSSkipVerify = b
 		}
 	}

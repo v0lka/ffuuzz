@@ -15,11 +15,14 @@ import (
 	"ffuuzz/internal/model"
 )
 
+// FindingStore provides PostgreSQL-backed persistence for fuzzing findings
+// with flexible filtering and pagination.
 type FindingStore struct {
 	db     *sqlx.DB
 	logger zerolog.Logger
 }
 
+// NewFindingStore creates a FindingStore backed by the given database connection.
 func NewFindingStore(db *sqlx.DB, logger zerolog.Logger) *FindingStore {
 	return &FindingStore{db: db, logger: logger}
 }
@@ -176,7 +179,7 @@ func (s *FindingStore) GetByID(ctx context.Context, id string) (*model.Finding, 
 // findingsQuery builds dynamic SQL for listing findings with optional filters.
 type findingsQuery struct {
 	conditions []string
-	args       []interface{}
+	args       []any
 	argIdx     int
 }
 
@@ -216,7 +219,7 @@ func (q *findingsQuery) withSince(t *time.Time) {
 	}
 }
 
-func (q *findingsQuery) build(limit, offset int) (string, []interface{}) {
+func (q *findingsQuery) build(limit, offset int) (string, []any) {
 	query := `SELECT f.id, f.campaign_id, f.type, f.status, f.signature, f.created_at, f.confirmed_at,
 		f.method, f.endpoint, f.details, f.seed_recording_id, f.minimized,
 		f.reproduce_status, f.reproduce_enqueued_at, f.reproduce_runs,
@@ -237,7 +240,7 @@ func (q *findingsQuery) build(limit, offset int) (string, []interface{}) {
 }
 
 // listFindings executes a findings query and batch-loads artifact IDs.
-func (s *FindingStore) listFindings(ctx context.Context, query string, args []interface{}) ([]model.Finding, error) {
+func (s *FindingStore) listFindings(ctx context.Context, query string, args []any) ([]model.Finding, error) {
 	var rows []findingRow
 	if err := s.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err

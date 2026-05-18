@@ -16,11 +16,14 @@ import (
 	"ffuuzz/internal/model"
 )
 
+// RecordingStore provides PostgreSQL-backed persistence for recording sessions
+// and their HTTP exchanges.
 type RecordingStore struct {
 	db     *sqlx.DB
 	logger zerolog.Logger
 }
 
+// NewRecordingStore creates a RecordingStore backed by the given database connection.
 func NewRecordingStore(db *sqlx.DB, logger zerolog.Logger) *RecordingStore {
 	return &RecordingStore{db: db, logger: logger}
 }
@@ -169,7 +172,7 @@ func (s *RecordingStore) List(ctx context.Context, limit, offset int, hostFilter
 
 	query := `SELECT id, schema_version, created_at, target_scheme, target_host, target_port, target_path, entry_count FROM recordings`
 	var conditions []string
-	var args []interface{}
+	var args []any
 	argIdx := 1
 
 	if hostFilter != "" {
@@ -210,7 +213,7 @@ func (s *RecordingStore) List(ctx context.Context, limit, offset int, hostFilter
 func (s *RecordingStore) ListAll(ctx context.Context, hostFilter, pathPrefix string) ([]model.RecordingSession, error) {
 	query := `SELECT id, schema_version, created_at, target_scheme, target_host, target_port, target_path, entry_count FROM recordings`
 	var conditions []string
-	var args []interface{}
+	var args []any
 	argIdx := 1
 
 	if hostFilter != "" {
@@ -488,7 +491,7 @@ var ErrRecordingsInUse = errors.New("recordings are used by active campaigns")
 func (s *RecordingStore) DeleteByPrefix(ctx context.Context, scheme, host string, port int, pathPrefix string) (int64, error) {
 	// Build the WHERE clause for matching recordings
 	baseWhere := `target_scheme = $1 AND target_host = $2 AND target_port = $3`
-	args := []interface{}{scheme, host, port}
+	args := []any{scheme, host, port}
 	if pathPrefix != "" {
 		baseWhere += ` AND target_path LIKE $4 ESCAPE '\'`
 		args = append(args, pathPrefix+"%")
@@ -581,7 +584,7 @@ func (s *RecordingStore) MergeRecordings(ctx context.Context, origin endpoint.Or
 
 	// Build LIKE conditions for all source prefixes.
 	conditions := make([]string, 0, len(sourcePrefixes))
-	args := []interface{}{origin.Scheme, origin.Host, origin.Port}
+	args := []any{origin.Scheme, origin.Host, origin.Port}
 	for i, sp := range sourcePrefixes {
 		conditions = append(conditions, fmt.Sprintf("r.target_path LIKE $%d ESCAPE '\\'", 4+i))
 		args = append(args, sp+"%")

@@ -17,6 +17,7 @@ type ArtifactStore struct {
 	logger zerolog.Logger
 }
 
+// NewArtifactStore creates an ArtifactStore backed by the given database connection.
 func NewArtifactStore(db *sqlx.DB, logger zerolog.Logger) *ArtifactStore {
 	return &ArtifactStore{db: db, logger: logger}
 }

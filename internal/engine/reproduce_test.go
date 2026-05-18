@@ -357,7 +357,7 @@ func TestStartReproduceWorker(t *testing.T) {
 	}
 
 	cancel()
-	e.reproduceWg.Wait()
+	e.reproduceWG.Wait()
 }
 
 func TestStopAll_WithReproduceWorker(t *testing.T) {

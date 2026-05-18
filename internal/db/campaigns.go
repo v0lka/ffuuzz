@@ -20,6 +20,7 @@ type CampaignStore struct {
 	logger zerolog.Logger
 }
 
+// NewCampaignStore creates a CampaignStore backed by the given database connection.
 func NewCampaignStore(db *sqlx.DB, logger zerolog.Logger) *CampaignStore {
 	return &CampaignStore{db: db, logger: logger}
 }

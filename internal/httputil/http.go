@@ -17,12 +17,14 @@ var hopByHopHeaders = []string{
 	"Upgrade",
 }
 
+// RemoveHopByHop strips hop-by-hop headers from the given header map.
 func RemoveHopByHop(h http.Header) {
 	for _, k := range hopByHopHeaders {
 		h.Del(k)
 	}
 }
 
+// CopyHeaders copies all headers from src to dst.
 func CopyHeaders(dst, src http.Header) {
 	for k, vv := range src {
 		for _, v := range vv {
@@ -31,6 +33,8 @@ func CopyHeaders(dst, src http.Header) {
 	}
 }
 
+// LimitedBuffer is a size-limited byte buffer that tracks whether data was
+// truncated.
 type LimitedBuffer struct {
 	buf       bytes.Buffer
 	limit     int
@@ -73,6 +77,8 @@ type TeeReadCloser struct {
 	w io.Writer
 }
 
+// NewTeeReadCloser returns an io.ReadCloser that mirrors reads to w.
+// Returns nil if r or w is nil.
 func NewTeeReadCloser(r io.ReadCloser, w io.Writer) io.ReadCloser {
 	if r == nil || w == nil {
 		return r

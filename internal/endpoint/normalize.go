@@ -11,7 +11,7 @@ import (
 // Placeholder is the universal placeholder for parameterised path segments.
 const Placeholder = "{_}"
 
-// Origin identifies an HTTP origin (scheme + host + port).
+// Origin identifies an HTTP origin by its scheme, host, and port.
 type Origin struct {
 	Scheme string
 	Host   string
@@ -116,7 +116,8 @@ func hasMixedClasses(s string) bool {
 	return classes >= 2
 }
 
-// SplitPathSegments splits a URL path into non-empty segments.
+// SplitPathSegments splits a URL path into non-empty segments, discarding
+// empty strings between consecutive slashes.
 func SplitPathSegments(path string) []string {
 	var segments []string
 	for _, s := range strings.Split(path, "/") {

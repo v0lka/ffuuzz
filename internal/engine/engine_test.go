@@ -465,8 +465,8 @@ func TestRunCampaign_Anomaly5xxDetection(t *testing.T) {
 	}
 
 	cfg := model.CampaignConfig{
-		Target: model.TargetURL{BaseURL: backend.URL},
-		Limits: model.CampaignLimits{Workers: 1, MaxTests: 3},
+		Target:  model.TargetURL{BaseURL: backend.URL},
+		Limits:  model.CampaignLimits{Workers: 1, MaxTests: 3},
 		Anomaly: model.AnomalyConfig{Detect5xx: true},
 	}
 

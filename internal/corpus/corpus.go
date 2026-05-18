@@ -28,6 +28,7 @@ type Manager struct {
 	logger     zerolog.Logger
 }
 
+// NewManager creates a corpus Manager with the given readers and logger.
 func NewManager(recordings RecordingReader, campaigns CampaignReader, logger zerolog.Logger) *Manager {
 	return &Manager{recordings: recordings, campaigns: campaigns, logger: logger}
 }

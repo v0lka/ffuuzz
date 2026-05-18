@@ -737,8 +737,8 @@ func TestFuzzStrings_Shared(t *testing.T) {
 	// Spot-check a few known payloads
 	found := map[string]bool{
 		"<script>alert(1)</script>": false,
-		"' OR '1'='1":              false,
-		"../../../etc/passwd":      false,
+		"' OR '1'='1":               false,
+		"../../../etc/passwd":       false,
 	}
 	for _, s := range fuzzStrings {
 		if _, ok := found[s]; ok {

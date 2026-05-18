@@ -62,7 +62,10 @@ func (m *PrimitiveMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity f
 	case 5:
 		opName = "splice"
 		// Splice with the response body as a second source
-		other, _ := base64.StdEncoding.DecodeString(ex.Response.BodyB64)
+		other, err := base64.StdEncoding.DecodeString(ex.Response.BodyB64)
+		if err != nil {
+			other = nil
+		}
 		if len(other) > 0 {
 			mutated = Splice(mutated, other, rng)
 		} else {

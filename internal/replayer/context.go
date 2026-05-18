@@ -31,7 +31,11 @@ type WorkerContext struct {
 
 // NewWorkerContext creates an isolated worker context with its own cookie jar and HTTP client.
 func NewWorkerContext(timeout time.Duration, logger zerolog.Logger) *WorkerContext {
-	jar, _ := cookiejar.New(nil)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to create cookie jar, continuing without cookie storage")
+		jar = nil
+	}
 	return &WorkerContext{
 		CookieJar: jar,
 		Variables: make(map[string]string),

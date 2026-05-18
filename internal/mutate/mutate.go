@@ -88,15 +88,6 @@ func DefaultConfig() Config {
 	}
 }
 
-// mapKeys returns the keys of a map[string][]string (e.g. http.Header, url.Values).
-func mapKeys(m map[string][]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // Pipeline composes multiple ExchangeMutators into a single mutator that applies
 // enabled mutation classes in sequence based on the config.
 type Pipeline struct {
@@ -223,3 +214,14 @@ func (p *Pipeline) enforceSizeLimits(ex model.Exchange) model.Exchange {
 
 	return ex
 }
+
+// mapKeys returns the keys of a map[string][]string (e.g. http.Header, url.Values).
+func mapKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// enforceSizeLimits applies configured maximum lengths to the mutated exchange

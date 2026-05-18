@@ -15,7 +15,10 @@ import (
 type ParamMutator struct{}
 
 func (m *ParamMutator) Mutate(ex model.Exchange, rng *rand.Rand, _ float64) MutationResult {
-	queryParams, _ := url.ParseQuery(ex.Request.Query)
+	queryParams, err := url.ParseQuery(ex.Request.Query)
+	if err != nil {
+		queryParams = url.Values{}
+	}
 	formParams, hasForm := m.parseFormBody(ex)
 
 	type surface struct {

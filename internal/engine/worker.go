@@ -71,6 +71,7 @@ type WorkerConfig struct {
 	Logger          zerolog.Logger
 }
 
+// NewWorker creates a Worker from the given configuration.
 func NewWorker(cfg WorkerConfig) *Worker {
 	return &Worker{
 		id:              cfg.ID,

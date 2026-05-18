@@ -3,6 +3,7 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
+// Prometheus metric definitions for the ffuuzz proxy and engine.
 var (
 	reg = prometheus.NewRegistry()
 
@@ -64,7 +65,7 @@ var (
 )
 
 func init() {
-	reg.MustRegister(
+	collectors := []prometheus.Collector{
 		TestsTotal,
 		FindingsTotal,
 		RequestDuration,
@@ -76,7 +77,12 @@ func init() {
 		CertErrors,
 		EndpointCollapses,
 		EndpointMerges,
-	)
+	}
+	for _, c := range collectors {
+		if err := reg.Register(c); err != nil {
+			panic("failed to register Prometheus metric: " + err.Error())
+		}
+	}
 }
 
 // Registry returns the custom Prometheus registry with all ffuuzz metrics.

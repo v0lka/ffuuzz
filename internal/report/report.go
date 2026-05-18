@@ -15,6 +15,7 @@ type Summary struct {
 	ByHost   map[string]int `json:"by_host"`
 }
 
+// BuildSummary aggregates statistics from a set of recorded transactions.
 func BuildSummary(records []recorder.TxRecord) Summary {
 	s := Summary{
 		ByMethod: make(map[string]int),

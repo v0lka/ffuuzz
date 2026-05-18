@@ -72,16 +72,26 @@ func (w *ReproduceWorker) processJob(ctx context.Context, findingID string, runs
 
 	// Load finding
 	finding, err := w.findings.GetByID(ctx, findingID)
-	if err != nil || finding == nil {
+	if err != nil {
 		w.logger.Error().Err(err).Str("finding_id", findingID).Msg("load finding failed")
+		w.failJob(ctx, findingID)
+		return
+	}
+	if finding == nil {
+		w.logger.Error().Str("finding_id", findingID).Msg("finding not found")
 		w.failJob(ctx, findingID)
 		return
 	}
 
 	// Load artifact
 	artifact, err := w.artifacts.GetByFindingID(ctx, findingID)
-	if err != nil || artifact == nil {
+	if err != nil {
 		w.logger.Error().Err(err).Str("finding_id", findingID).Msg("load artifact failed")
+		w.failJob(ctx, findingID)
+		return
+	}
+	if artifact == nil {
+		w.logger.Error().Str("finding_id", findingID).Msg("artifact not found")
 		w.failJob(ctx, findingID)
 		return
 	}

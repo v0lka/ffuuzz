@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -256,12 +257,12 @@ func rewritePath(segments []string, position int, originalPath string) string {
 
 // joinSegments joins non-empty segments with "/".
 func joinSegments(segments []string) string {
-	if len(segments) == 0 {
-		return ""
+	var b strings.Builder
+	for i, s := range segments {
+		if i > 0 {
+			b.WriteByte('/')
+		}
+		b.WriteString(s)
 	}
-	result := segments[0]
-	for _, s := range segments[1:] {
-		result += "/" + s
-	}
-	return result
+	return b.String()
 }

@@ -61,19 +61,6 @@ func (d *TimeoutDetector) Detect(ex model.Exchange, result replayer.ExchangeResu
 	return nil
 }
 
-func isTimeoutError(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		return true
-	}
-	if os.IsTimeout(err) {
-		return true
-	}
-	return strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline")
-}
-
 // ServerErrorDetector flags exchanges that returned HTTP 5xx status codes.
 type ServerErrorDetector struct{}
 
@@ -179,6 +166,8 @@ type MultiDetector struct {
 	detectors []Detector
 }
 
+// NewMultiDetector creates a MultiDetector with all enabled anomaly detectors
+// based on the supplied configuration.
 func NewMultiDetector(cfg model.AnomalyConfig, logger zerolog.Logger) *MultiDetector {
 	md := &MultiDetector{}
 	// Always check for timeouts
@@ -201,4 +190,19 @@ func (md *MultiDetector) Detect(ex model.Exchange, result replayer.ExchangeResul
 		hits = append(hits, d.Detect(ex, result, baseline, cfg)...)
 	}
 	return hits
+}
+
+// isTimeoutError checks whether an error represents a timeout condition,
+// using standard library checks with a string-based fallback for edge cases.
+func isTimeoutError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return true
+	}
+	if os.IsTimeout(err) {
+		return true
+	}
+	return strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline")
 }

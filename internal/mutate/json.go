@@ -38,7 +38,7 @@ func (m *JSONMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float6
 	}
 
 	// Try to parse as JSON regardless of Content-Type
-	var data interface{}
+	var data any
 	if err := json.Unmarshal(bodyBytes, &data); err != nil || !isJSON {
 		// Fallback to primitive byte mutation
 		p := &PrimitiveMutator{}
@@ -78,9 +78,9 @@ func (m *JSONMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float6
 	return MutationResult{Exchange: ex, Operators: []string{opName}}
 }
 
-func (m *JSONMutator) typeSubstitute(data interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) typeSubstitute(data any, rng *rand.Rand) any {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
@@ -90,7 +90,7 @@ func (m *JSONMutator) typeSubstitute(data interface{}, rng *rand.Rand) interface
 			v[key] = m.substituteType(v[key], rng)
 		}
 		return v
-	case []interface{}:
+	case []any:
 		if len(v) > 0 {
 			idx := rng.Intn(len(v))
 			v[idx] = m.substituteType(v[idx], rng)
@@ -101,7 +101,7 @@ func (m *JSONMutator) typeSubstitute(data interface{}, rng *rand.Rand) interface
 	}
 }
 
-func (m *JSONMutator) substituteType(val interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) substituteType(val any, rng *rand.Rand) any {
 	switch rng.Intn(7) {
 	case 0:
 		return nil
@@ -114,15 +114,15 @@ func (m *JSONMutator) substituteType(val interface{}, rng *rand.Rand) interface{
 	case 4:
 		return randomString(rng, 10)
 	case 5:
-		return []interface{}{1, "a", nil}
+		return []any{1, "a", nil}
 	case 6:
-		return map[string]interface{}{"fuzz": true}
+		return map[string]any{"fuzz": true}
 	}
 	return val
 }
 
-func (m *JSONMutator) objectKeyMutation(data interface{}, rng *rand.Rand) interface{} {
-	obj, ok := data.(map[string]interface{})
+func (m *JSONMutator) objectKeyMutation(data any, rng *rand.Rand) any {
+	obj, ok := data.(map[string]any)
 	if !ok {
 		return data
 	}
@@ -155,14 +155,14 @@ func (m *JSONMutator) objectKeyMutation(data interface{}, rng *rand.Rand) interf
 	return obj
 }
 
-func (m *JSONMutator) arrayMutation(data interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) arrayMutation(data any, rng *rand.Rand) any {
 	switch v := data.(type) {
-	case []interface{}:
+	case []any:
 		return m.mutateArray(v, rng)
-	case map[string]interface{}:
+	case map[string]any:
 		// Find an array field to mutate
 		for k, val := range v {
-			if arr, ok := val.([]interface{}); ok {
+			if arr, ok := val.([]any); ok {
 				v[k] = m.mutateArray(arr, rng)
 				return v
 			}
@@ -174,15 +174,15 @@ func (m *JSONMutator) arrayMutation(data interface{}, rng *rand.Rand) interface{
 		}
 		if len(keys) > 0 {
 			key := keys[rng.Intn(len(keys))]
-			v[key] = []interface{}{v[key]}
+			v[key] = []any{v[key]}
 		}
 		return v
 	default:
-		return []interface{}{data, data}
+		return []any{data, data}
 	}
 }
 
-func (m *JSONMutator) mutateArray(arr []interface{}, rng *rand.Rand) []interface{} {
+func (m *JSONMutator) mutateArray(arr []any, rng *rand.Rand) []any {
 	op := rng.Intn(4)
 	switch op {
 	case 0: // duplicate element
@@ -198,12 +198,12 @@ func (m *JSONMutator) mutateArray(arr []interface{}, rng *rand.Rand) []interface
 			arr = append(arr[:idx], arr[idx+1:]...)
 		}
 	case 3: // make empty
-		arr = []interface{}{}
+		arr = []any{}
 	}
 	return arr
 }
 
-func (m *JSONMutator) boundaryValues(data interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) boundaryValues(data any, rng *rand.Rand) any {
 	boundaryNumbers := []float64{
 		0, -0, 1, -1,
 		math.MaxFloat64, -math.MaxFloat64,
@@ -215,7 +215,7 @@ func (m *JSONMutator) boundaryValues(data interface{}, rng *rand.Rand) interface
 	}
 
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
@@ -229,7 +229,7 @@ func (m *JSONMutator) boundaryValues(data interface{}, rng *rand.Rand) interface
 			}
 		}
 		return v
-	case []interface{}:
+	case []any:
 		if len(v) > 0 {
 			v[rng.Intn(len(v))] = boundaryNumbers[rng.Intn(len(boundaryNumbers))]
 		}
@@ -239,32 +239,32 @@ func (m *JSONMutator) boundaryValues(data interface{}, rng *rand.Rand) interface
 	}
 }
 
-func (m *JSONMutator) depthStress(data interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) depthStress(data any, rng *rand.Rand) any {
 	depth := 20 + rng.Intn(80) // 20-100 levels deep
 	nested := buildNestedObject(depth, rng)
 
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		v["_fuzz_deep"] = nested
 		return v
 	default:
-		return map[string]interface{}{"_fuzz_deep": nested, "_original": data}
+		return map[string]any{"_fuzz_deep": nested, "_original": data}
 	}
 }
 
-func buildNestedObject(depth int, rng *rand.Rand) interface{} {
+func buildNestedObject(depth int, rng *rand.Rand) any {
 	if depth <= 0 {
 		return randomString(rng, 5)
 	}
 	if rng.Intn(2) == 0 {
-		return map[string]interface{}{"n": buildNestedObject(depth-1, rng)}
+		return map[string]any{"n": buildNestedObject(depth-1, rng)}
 	}
-	return []interface{}{buildNestedObject(depth-1, rng)}
+	return []any{buildNestedObject(depth-1, rng)}
 }
 
-func (m *JSONMutator) stringMutation(data interface{}, rng *rand.Rand) interface{} {
+func (m *JSONMutator) stringMutation(data any, rng *rand.Rand) any {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)

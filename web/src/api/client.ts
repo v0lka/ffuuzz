@@ -16,6 +16,31 @@ class ApiClientError extends Error {
     }
 }
 
+async function parseApiErrorResponse(
+    res: Response,
+    defaultError = "UNKNOWN",
+): Promise<APIError> {
+    try {
+        return (await res.json()) as APIError;
+    } catch {
+        return { error: defaultError, message: res.statusText, request_id: "" };
+    }
+}
+
+function buildQueryString(
+    params?: Record<string, string | number | undefined>,
+): string {
+    if (!params) return "";
+    const sp = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== "") {
+            sp.set(key, String(value));
+        }
+    }
+    const qs = sp.toString();
+    return qs ? `?${qs}` : "";
+}
+
 async function request<T>(
     method: string,
     url: string,
@@ -37,17 +62,10 @@ async function request<T>(
     }
 
     if (!res.ok) {
-        let apiErr: APIError;
-        try {
-            apiErr = (await res.json()) as APIError;
-        } catch {
-            apiErr = {
-                error: "UNKNOWN",
-                message: res.statusText,
-                request_id: "",
-            };
-        }
-        throw new ApiClientError(res.status, apiErr);
+        throw new ApiClientError(
+            res.status,
+            await parseApiErrorResponse(res),
+        );
     }
 
     return (await res.json()) as T;
@@ -57,17 +75,7 @@ export function get<T>(
     url: string,
     params?: Record<string, string | number | undefined>,
 ): Promise<T> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-        for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined && value !== "") {
-                searchParams.set(key, String(value));
-            }
-        }
-    }
-    const qs = searchParams.toString();
-    const fullUrl = qs ? `${url}?${qs}` : url;
-    return request<T>("GET", fullUrl);
+    return request<T>("GET", `${url}${buildQueryString(params)}`);
 }
 
 export function post<T>(url: string, body?: unknown): Promise<T> {
@@ -82,17 +90,7 @@ export function delWithParams<T = void>(
     url: string,
     params?: Record<string, string | number | undefined>,
 ): Promise<T> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-        for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined && value !== "") {
-                searchParams.set(key, String(value));
-            }
-        }
-    }
-    const qs = searchParams.toString();
-    const fullUrl = qs ? `${url}?${qs}` : url;
-    return request<T>("DELETE", fullUrl);
+    return request<T>("DELETE", `${url}${buildQueryString(params)}`);
 }
 
-export { ApiClientError };
+export { ApiClientError, parseApiErrorResponse, buildQueryString };

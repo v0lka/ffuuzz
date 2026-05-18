@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/lib/pq"
+
+	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
 	"github.com/rs/zerolog"
 )
 
@@ -34,7 +35,9 @@ func Open(dsn string, logger zerolog.Logger) (*Database, error) {
 	d := &Database{DB: db, logger: logger}
 
 	if err := d.runMigrations(dsn); err != nil {
-		_ = db.Close()
+		if cerr := db.Close(); cerr != nil {
+			logger.Warn().Err(cerr).Msg("close database after migration failure")
+		}
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 

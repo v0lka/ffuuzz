@@ -3,9 +3,17 @@ import type {
     ImportResult,
     TreeOrigin,
     DeleteByPrefixResponse,
-    APIError,
 } from "@/types/api";
-import { get, post, del, delWithParams, ApiClientError, API_BASE } from "./client";
+import {
+    get,
+    post,
+    del,
+    delWithParams,
+    ApiClientError,
+    parseApiErrorResponse,
+    buildQueryString,
+    API_BASE,
+} from "./client";
 
 export async function listRecordings(params?: {
     limit?: number;
@@ -58,28 +66,14 @@ export async function exportRecordings(params?: {
     host?: string;
     path_prefix?: string;
 }): Promise<void> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-        for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined && value !== "") {
-                searchParams.set(key, String(value));
-            }
-        }
-    }
-    const qs = searchParams.toString();
-    const url = qs
-        ? `${API_BASE}/recordings/export?${qs}`
-        : `${API_BASE}/recordings/export`;
+    const url = `${API_BASE}/recordings/export${buildQueryString(params)}`;
 
     const res = await fetch(url);
     if (!res.ok) {
-        let apiErr: APIError;
-        try {
-            apiErr = (await res.json()) as APIError;
-        } catch {
-            apiErr = { error: "EXPORT_FAILED", message: res.statusText, request_id: "" };
-        }
-        throw new ApiClientError(res.status, apiErr);
+        throw new ApiClientError(
+            res.status,
+            await parseApiErrorResponse(res, "EXPORT_FAILED"),
+        );
     }
     const blob = await res.blob();
     const a = document.createElement("a");

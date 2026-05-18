@@ -10,14 +10,14 @@ import (
 
 // mockMerger records calls for testing.
 type mockMerger struct {
-	mu              sync.Mutex
-	mergeCalls      []mergeCall
-	paths           map[Origin][]string
-	origins         []Origin
-	mergeErr        error
-	mergeReturnN    int
-	listPathsErr    error
-	listOriginsErr  error
+	mu             sync.Mutex
+	mergeCalls     []mergeCall
+	paths          map[Origin][]string
+	origins        []Origin
+	mergeErr       error
+	mergeReturnN   int
+	listPathsErr   error
+	listOriginsErr error
 }
 
 type mergeCall struct {

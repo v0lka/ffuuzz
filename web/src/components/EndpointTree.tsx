@@ -14,7 +14,7 @@ import {
     useCampaigns,
     useAddRecordingsToCampaign,
 } from "@/hooks/queries";
-import type { TreePathNode, TreeOrigin, Campaign } from "@/types/api";
+import type { TreePathNode, TreeOrigin, Campaign, CampaignStatus } from "@/types/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export interface EndpointFilter {
@@ -56,7 +56,7 @@ function loadExpanded(): Set<string> {
     return new Set();
 }
 
-const INACTIVE_STATUSES = new Set([
+const INACTIVE_STATUSES: Set<CampaignStatus> = new Set([
     "CREATED",
     "STOPPED",
     "FINISHED",
