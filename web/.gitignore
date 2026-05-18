@@ -1,4 +1,4 @@
 node_modules/
-dist/
+dist/**
 !dist/.gitkeep
 tsconfig.tsbuildinfo
