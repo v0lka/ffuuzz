@@ -29,69 +29,75 @@ type SeedTask struct {
 
 // Worker executes fuzz tests: mutate -> replay -> detect -> triage.
 type Worker struct {
-	id              int
-	campaignID      string
-	baseURL         string
-	pipeline        *mutate.Pipeline
-	seqMutator      *mutate.SeqMutator
-	detector        *anomaly.MultiDetector
-	triager         *triage.Triager
-	replayer        *replayer.Replayer
-	findings        FindingStore
-	artifacts       ArtifactStore
-	campaigns       CampaignStore
-	artifactDir     string
-	anomalyCfg      model.AnomalyConfig
-	triageCfg       model.TriageConfig
-	baselines       map[string]*anomaly.BaselineEntry
-	reqTimeoutMs    int64
-	extractionRules []replayer.ExtractionRule
-	logger          zerolog.Logger
+	id               int
+	campaignID       string
+	baseURL          string
+	pipeline         *mutate.Pipeline
+	seqMutator       *mutate.SeqMutator
+	detector         *anomaly.MultiDetector
+	triager          *triage.Triager
+	replayer         *replayer.Replayer
+	findings         FindingStore
+	artifacts        ArtifactStore
+	campaigns        CampaignStore
+	artifactDir      string
+	anomalyCfg       model.AnomalyConfig
+	triageCfg        model.TriageConfig
+	baselines        map[string]*anomaly.BaselineEntry
+	reqTimeoutMs     int64
+	extractionRules  []replayer.ExtractionRule
+	intensityTracker *IntensityTracker
+	feedbackTracker  *SeedInterestTracker
+	logger           zerolog.Logger
 }
 
 // WorkerConfig bundles dependencies for a Worker.
 type WorkerConfig struct {
-	ID              int
-	CampaignID      string
-	BaseURL         string
-	Pipeline        *mutate.Pipeline
-	SeqMutator      *mutate.SeqMutator
-	Detector        *anomaly.MultiDetector
-	Triager         *triage.Triager
-	Replayer        *replayer.Replayer
-	Findings        FindingStore
-	Artifacts       ArtifactStore
-	Campaigns       CampaignStore
-	ArtifactDir     string
-	AnomalyCfg      model.AnomalyConfig
-	TriageCfg       model.TriageConfig
-	Baselines       map[string]*anomaly.BaselineEntry
-	ReqTimeoutMs    int64
-	ExtractionRules []replayer.ExtractionRule
-	Logger          zerolog.Logger
+	ID               int
+	CampaignID       string
+	BaseURL          string
+	Pipeline         *mutate.Pipeline
+	SeqMutator       *mutate.SeqMutator
+	Detector         *anomaly.MultiDetector
+	Triager          *triage.Triager
+	Replayer         *replayer.Replayer
+	Findings         FindingStore
+	Artifacts        ArtifactStore
+	Campaigns        CampaignStore
+	ArtifactDir      string
+	AnomalyCfg       model.AnomalyConfig
+	TriageCfg        model.TriageConfig
+	Baselines        map[string]*anomaly.BaselineEntry
+	ReqTimeoutMs     int64
+	ExtractionRules  []replayer.ExtractionRule
+	IntensityTracker *IntensityTracker
+	FeedbackTracker  *SeedInterestTracker
+	Logger           zerolog.Logger
 }
 
 // NewWorker creates a Worker from the given configuration.
 func NewWorker(cfg WorkerConfig) *Worker {
 	return &Worker{
-		id:              cfg.ID,
-		campaignID:      cfg.CampaignID,
-		baseURL:         cfg.BaseURL,
-		pipeline:        cfg.Pipeline,
-		seqMutator:      cfg.SeqMutator,
-		detector:        cfg.Detector,
-		triager:         cfg.Triager,
-		replayer:        cfg.Replayer,
-		findings:        cfg.Findings,
-		artifacts:       cfg.Artifacts,
-		campaigns:       cfg.Campaigns,
-		artifactDir:     cfg.ArtifactDir,
-		anomalyCfg:      cfg.AnomalyCfg,
-		triageCfg:       cfg.TriageCfg,
-		baselines:       cfg.Baselines,
-		reqTimeoutMs:    cfg.ReqTimeoutMs,
-		extractionRules: cfg.ExtractionRules,
-		logger:          cfg.Logger.With().Int("worker", cfg.ID).Logger(),
+		id:               cfg.ID,
+		campaignID:       cfg.CampaignID,
+		baseURL:          cfg.BaseURL,
+		pipeline:         cfg.Pipeline,
+		seqMutator:       cfg.SeqMutator,
+		detector:         cfg.Detector,
+		triager:          cfg.Triager,
+		replayer:         cfg.Replayer,
+		findings:         cfg.Findings,
+		artifacts:        cfg.Artifacts,
+		campaigns:        cfg.Campaigns,
+		artifactDir:      cfg.ArtifactDir,
+		anomalyCfg:       cfg.AnomalyCfg,
+		triageCfg:        cfg.TriageCfg,
+		baselines:        cfg.Baselines,
+		reqTimeoutMs:     cfg.ReqTimeoutMs,
+		extractionRules:  cfg.ExtractionRules,
+		intensityTracker: cfg.IntensityTracker,
+		feedbackTracker:  cfg.FeedbackTracker,
+		logger:           cfg.Logger.With().Int("worker", cfg.ID).Logger(),
 	}
 }
 
@@ -184,6 +190,11 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 		allOps = append(allOps, result.Operators...)
 	}
 
+	// Record mutation operators for adaptive intensity tracking
+	if w.intensityTracker != nil {
+		w.intensityTracker.RecordApplication(allOps)
+	}
+
 	// Replay the mutated session
 	mutatedSession := task.Session
 	mutatedSession.Entries = mutatedEntries
@@ -200,6 +211,18 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 		if i < len(mutatedSession.Entries) {
 			mutatedSession.Entries[i].Response = buildResponseData(result)
 			mutatedSession.Entries[i].DurationMs = result.DurationMs
+		}
+	}
+
+	// Record responses for coverage-guided feedback tracking
+	if w.feedbackTracker != nil {
+		for _, result := range results {
+			// Only track error responses (4xx/5xx) for novelty
+			errBody := ""
+			if result.StatusCode >= 400 {
+				errBody = string(result.RespBody)
+			}
+			w.feedbackTracker.RecordResponse(task.Session.ID, result.StatusCode, errBody)
 		}
 	}
 
@@ -282,6 +305,16 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 	if err := w.findings.Create(ctx, finding); err != nil {
 		w.logger.Error().Err(err).Str("finding_id", findingID).Msg("create finding failed")
 		return
+	}
+
+	// Record finding for adaptive intensity tracking
+	if w.intensityTracker != nil {
+		w.intensityTracker.RecordFinding(ops)
+	}
+
+	// Record finding for coverage-guided feedback tracking
+	if w.feedbackTracker != nil {
+		w.feedbackTracker.RecordFinding(session.ID)
 	}
 
 	metrics.FindingsTotal.WithLabelValues(string(hit.Type)).Inc()

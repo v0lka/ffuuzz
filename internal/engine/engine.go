@@ -175,6 +175,20 @@ func (e *Engine) runCampaign(
 		seqMutator = &mutate.SeqMutator{}
 	}
 
+	// Extract real header values from recorded traffic into the dictionary
+	if dict := pipeline.Dict(); dict != nil {
+		dict.ExtractFromTraffic(seeds)
+	}
+
+	// Setup adaptive intensity tracking
+	intensityTracker := NewIntensityTracker()
+	pipeline.SetIntensityCallback(func(prefix string) float64 {
+		return intensityTracker.GetMultiplier(prefix)
+	})
+
+	// Setup coverage-guided feedback tracking
+	feedbackTracker := NewSeedInterestTracker()
+
 	// Setup detectors
 	detector := anomaly.NewMultiDetector(cfg.Anomaly, logger)
 	triager := triage.NewTriager()
@@ -207,24 +221,26 @@ func (e *Engine) runCampaign(
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		w := NewWorker(WorkerConfig{
-			ID:              i,
-			CampaignID:      campaignID,
-			BaseURL:         cfg.Target.BaseURL,
-			Pipeline:        pipeline,
-			SeqMutator:      seqMutator,
-			Detector:        detector,
-			Triager:         triager,
-			Replayer:        rep,
-			Findings:        e.findings,
-			Artifacts:       e.artifacts,
-			Campaigns:       e.campaigns,
-			ArtifactDir:     e.artifactDir,
-			AnomalyCfg:      cfg.Anomaly,
-			TriageCfg:       cfg.Triage,
-			Baselines:       baselines,
-			ReqTimeoutMs:    cfg.Limits.ReqTimeoutMs,
-			ExtractionRules: extractionRules,
-			Logger:          logger,
+			ID:               i,
+			CampaignID:       campaignID,
+			BaseURL:          cfg.Target.BaseURL,
+			Pipeline:         pipeline,
+			SeqMutator:       seqMutator,
+			Detector:         detector,
+			Triager:          triager,
+			Replayer:         rep,
+			Findings:         e.findings,
+			Artifacts:        e.artifacts,
+			Campaigns:        e.campaigns,
+			ArtifactDir:      e.artifactDir,
+			AnomalyCfg:       cfg.Anomaly,
+			TriageCfg:        cfg.Triage,
+			Baselines:        baselines,
+			ReqTimeoutMs:     cfg.Limits.ReqTimeoutMs,
+			ExtractionRules:  extractionRules,
+			IntensityTracker: intensityTracker,
+			FeedbackTracker:  feedbackTracker,
+			Logger:           logger,
 		})
 		go func() {
 			defer wg.Done()
@@ -251,6 +267,12 @@ func (e *Engine) runCampaign(
 		Int("max_tests", maxTests).
 		Int("duration_sec", durationSec).
 		Msg("campaign running")
+
+	// Build seed ID index for weighted selection
+	seedIDs := make([]string, len(seeds))
+	for i, s := range seeds {
+		seedIDs[i] = s.ID
+	}
 
 	func() {
 		defer close(taskCh)
@@ -280,8 +302,14 @@ func (e *Engine) runCampaign(
 				return
 			}
 
-			// Pick a random seed session
-			session := seeds[rng.Intn(len(seeds))]
+			// Pick a seed: epsilon-greedy — 20% exploration (uniform random), 80% exploitation (weighted by interest)
+			var session model.RecordingSession
+			if len(seeds) > 1 && rng.Float64() < 0.8 {
+				weights := feedbackTracker.NormalizedWeights(seedIDs)
+				session = weightedPick(seeds, weights, rng)
+			} else {
+				session = seeds[rng.Intn(len(seeds))]
+			}
 			seed := rng.Int63()
 
 			select {
@@ -396,4 +424,23 @@ func (e *Engine) StartReproduceWorker(ctx context.Context) {
 		defer e.reproduceWG.Done()
 		w.Run(rCtx)
 	}()
+}
+
+// weightedPick selects an item from items using a probability distribution.
+// Weights must be normalized (sum to 1.0). Uses cumulative distribution sampling.
+func weightedPick[T any](items []T, weights []float64, rng *rand.Rand) T {
+	if len(weights) != len(items) || len(items) == 0 {
+		var zero T
+		return zero
+	}
+	r := rng.Float64()
+	cumulative := 0.0
+	for i, w := range weights {
+		cumulative += w
+		if r < cumulative {
+			return items[i]
+		}
+	}
+	// Fallback: return last item
+	return items[len(items)-1]
 }

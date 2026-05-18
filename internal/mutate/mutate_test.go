@@ -111,9 +111,8 @@ func TestHeaderMutator_NilHeaders(t *testing.T) {
 }
 
 func TestHeaderMutator_UserDict(t *testing.T) {
-	userDict := map[string][]string{
-		"X-Custom": {"val1", "val2"},
-	}
+	userDict := NewDictionary()
+	userDict.AddGlobal("X-Custom", []string{"val1", "val2"})
 	m := &HeaderMutator{MaxHdrLen: 8192, UserDict: userDict}
 	for seed := int64(0); seed < 50; seed++ {
 		rng := newRNG(seed)
@@ -731,14 +730,25 @@ func TestPipeline_ParamsMutator(t *testing.T) {
 }
 
 func TestFuzzStrings_Shared(t *testing.T) {
-	if len(fuzzStrings) != 13 {
-		t.Errorf("expected 13 fuzz strings, got %d", len(fuzzStrings))
+	if len(fuzzStrings) != 32 {
+		t.Errorf("expected 32 fuzz strings, got %d", len(fuzzStrings))
 	}
-	// Spot-check a few known payloads
+	// Spot-check known payloads across all categories
 	found := map[string]bool{
+		// Original
 		"<script>alert(1)</script>": false,
 		"' OR '1'='1":               false,
 		"../../../etc/passwd":       false,
+		// XXE
+		`<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`: false,
+		// SSRF
+		"http://169.254.169.254/latest/meta-data/": false,
+		// Command injection
+		"`id`":       false,
+		"$(whoami)":  false,
+		// Prototype pollution
+		"__proto__":  false,
+		"constructor": false,
 	}
 	for _, s := range fuzzStrings {
 		if _, ok := found[s]; ok {

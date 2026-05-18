@@ -22,7 +22,7 @@ var builtinHeaderDict = map[string][]string{
 // HeaderMutator applies mutations to HTTP request headers.
 type HeaderMutator struct {
 	MaxHdrLen int
-	UserDict  map[string][]string
+	UserDict  *Dictionary
 }
 
 func (m *HeaderMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
@@ -109,7 +109,10 @@ func (m *HeaderMutator) dictSubstitute(ex model.Exchange, rng *rand.Rand) model.
 		dict[k] = v
 	}
 	if m.UserDict != nil {
-		for k, v := range m.UserDict {
+		// Get endpoint-aware values from the user dictionary
+		endpoint := ex.Request.Path
+		userHeaders := mergeUserDict(builtinHeaderDict, m.UserDict, endpoint)
+		for k, v := range userHeaders {
 			dict[k] = v
 		}
 	}
@@ -124,6 +127,28 @@ func (m *HeaderMutator) dictSubstitute(ex model.Exchange, rng *rand.Rand) model.
 	val := vals[rng.Intn(len(vals))]
 	ex.Request.Headers[key] = []string{val}
 	return ex
+}
+
+// mergeUserDict returns endpoint-aware header→values from the user dictionary,
+// merging user-supplied entries with built-in dict values.
+func mergeUserDict(builtin map[string][]string, userDict *Dictionary, endpoint string) map[string][]string {
+	result := make(map[string][]string)
+	for k, v := range builtin {
+		result[k] = make([]string, len(v))
+		copy(result[k], v)
+	}
+	// Enrich with all user dictionary headers for this endpoint
+	for _, h := range userDict.AllHeaders(endpoint) {
+		userVals := userDict.ValuesForHeader(endpoint, h)
+		if _, exists := result[h]; exists {
+			result[h] = append(result[h], userVals...)
+		} else {
+			dest := make([]string, len(userVals))
+			copy(dest, userVals)
+			result[h] = dest
+		}
+	}
+	return result
 }
 
 func (m *HeaderMutator) conflicting(ex model.Exchange, rng *rand.Rand) model.Exchange {

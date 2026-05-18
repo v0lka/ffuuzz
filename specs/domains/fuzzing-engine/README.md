@@ -8,11 +8,14 @@ The fuzzing engine orchestrates the core "fuzz" phase: loading recording seeds, 
 
 | File | Role |
 |------|------|
-| `internal/engine/engine.go` | `Engine` struct, `StartCampaign`, `StopCampaign`, `StopAll`, `runCampaign` |
-| `internal/engine/worker.go` | `Worker` struct, fuzz loop (mutate → replay → detect → triage → persist) |
+| `internal/engine/engine.go` | `Engine` struct, `StartCampaign`, `StopCampaign`, `StopAll`, `runCampaign`, epsilon-greedy seed selection |
+| `internal/engine/worker.go` | `Worker` struct, fuzz loop (mutate → replay → detect → triage → persist), intensity/feedback tracking |
+| `internal/engine/intensity.go` | `IntensityTracker`: per-operator productivity statistics, adaptive intensity multipliers |
+| `internal/engine/feedback.go` | `SeedInterestTracker`: coverage-guided seed scoring, weighted selection weights |
 | `internal/engine/limiter.go` | `Limiter`: token-bucket rate limiting |
 | `internal/engine/reproduce.go` | `ReproduceWorker`: background finding reproduction |
 | `internal/mutate/mutate.go` | `Pipeline`: mutation pipeline orchestrator |
+| `internal/mutate/dictionary.go` | `Dictionary`: user-supplied header values with per-endpoint support, traffic extraction |
 | `internal/replayer/replayer.go` | `Replayer`: HTTP replay client |
 | `internal/corpus/manager.go` | `Manager`: seed loading, P50 baseline computation |
 
@@ -53,6 +56,11 @@ Engine.StartCampaign(campaign)
     └── go runCampaign(ctx, campaignID, cfg, seeds, baselines)
             │
             ├── Create mutation Pipeline
+            ├── pipeline.Dict().ExtractFromTraffic(seeds)
+            │
+            ├── Create IntensityTracker → pipeline.SetIntensityCallback(...)
+            ├── Create SeedInterestTracker
+            │
             ├── Create anomaly MultiDetector
             ├── Create Triager
             ├── Create Replayer
@@ -62,19 +70,25 @@ Engine.StartCampaign(campaign)
             │   │
             │   └── Worker loop: for each SeedTask:
             │       1. pipeline.Mutate(exchange, rng)
-            │       2. replayer.ReplayExchange(...)
-            │       3. detector.Detect(...)
-            │       4. for each AnomalyHit:
+            │       2. intensityTracker.RecordApplication(ops)
+            │       3. replayer.ReplayExchange(...)
+            │       4. feedbackTracker.RecordResponse(seedID, status, errorBody)
+            │       5. detector.Detect(...)
+            │       6. for each AnomalyHit:
             │            triage.Signature → dedup
             │            triage.Confirm → N-replay
             │            triage.MinimizeSession
             │            triage.MinimizeJSONBody
+            │            intensityTracker.RecordFinding(ops)
+            │            feedbackTracker.RecordFinding(seedID)
             │            persist Finding + Artifact to DB
             │
             └── Task generator (single goroutine):
                 │  loop until ctx.Done() || max_tests || duration_sec
                 │  limiter.Acquire() (blocks if over RPS)
-                │  pick random seed + random mutation seed
+                │  seed selection:
+                │    80%: weightedPick (exploitation — interest-weighted)
+                │    20%: uniform random (exploration)
                 │  taskCh ← SeedTask
                 │
                 ├── max_tests reached → FINISHED
