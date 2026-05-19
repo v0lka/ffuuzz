@@ -46,7 +46,8 @@ FFUUZZ follows a strict 4-layer architecture where dependencies flow downward: B
 │  └──────────┘  └──────────┘  └──────────┘  └───────┘│            │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐            │            │
 │  │  store   │  │  config  │  │ metrics  │            │            │
-│  │ cert LRU │  │ env+flag │  │prometheus│            │            │
+│  │ cert LRU │  │env+flag+ │  │prometheus│            │            │
+│  │          │  │ dotenv   │  │          │            │            │
 │  └──────────┘  └──────────┘  └──────────┘            │            │
 ├──────────────────────────────────────────────────────┼────────────┤
 │                     UTILITY                          │            │
@@ -76,7 +77,7 @@ FFUUZZ follows a strict 4-layer architecture where dependencies flow downward: B
 | `internal/recorder` | Infrastructure | Recording pipeline: `Recorder` interface, `DBRecorder` (normalised paths, grouping), JSONL file recorder. |
 | `internal/replayer` | Infrastructure | HTTP replay client. `Replayer` sends exchanges to target. `WorkerContext` manages cookies, variables, extraction rules. |
 | `internal/store` | Infrastructure | TLS certificate management: root CA generation, leaf cert LRU cache, disk persistence, `singleflight` dedup. |
-| `internal/config` | Infrastructure | Configuration loading from env vars (`FFUUZZ_*`) and CLI flags. `DefaultConfig()` with production-safe defaults. |
+| `internal/config` | Infrastructure | Configuration loading from `.env` file, env vars (`FFUUZZ_*`), and CLI flags. `DefaultConfig()` with production-safe defaults. Supports `${VAR}` expansion in `.env` files. |
 | `internal/metrics` | Infrastructure | Prometheus metrics in a custom registry. Counters, histograms for tests, findings, cert cache, endpoints. |
 | `internal/llm` | Infrastructure | LLM provider abstraction: OpenAI and Anthropic backends. Factory (`NewProvider`) supports graceful degradation when disabled. |
 | `internal/logging` | Utility | Zerolog factory. Context helpers for request/campaign/recording IDs. Zero internal deps. |

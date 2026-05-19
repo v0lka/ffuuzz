@@ -63,7 +63,27 @@ The application will be available at:
 
 ## Configuration
 
-Configuration is loaded from environment variables first, then overridden by CLI flags.
+FFUZZ configuration is loaded with the following priority (highest to lowest):
+
+1. CLI flags
+2. Environment variables
+3. `.env` file variables (supports `${VAR}` expansion)
+4. Built-in defaults
+
+### .env File
+
+The recommended way to configure FFUZZ is via a `.env` file in the working directory.
+Copy the example file and edit it:
+
+```bash
+cp .env.example .env
+```
+
+The `.env` file supports referencing other variables using `${VAR}` or `$VAR` syntax:
+
+```bash
+FFUUZZ_DATABASE_URI=postgres://${DB_USER}:${DB_PASS}@localhost:5432/ffuuzz
+```
 
 ### Environment Variables
 
@@ -77,7 +97,21 @@ Configuration is loaded from environment variables first, then overridden by CLI
 | `FFUUZZ_RPS` | `50` | Requests per second limit |
 | `FFUUZZ_REQ_TIMEOUT` | `3s` | Per-request timeout (Go duration) |
 | `FFUUZZ_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown timeout |
+| `FFUUZZ_MAX_BODY_BYTES` | `65536` | Max HTTP response body bytes to record |
 | `FFUUZZ_TLS_SKIP_VERIFY` | `true` | Skip TLS verification for upstream |
+| `FFUUZZ_TLS_MIN_VERSION` | `1.2` | Minimum TLS version (`1.2` or `1.3`) |
+| `FFUUZZ_TLS_HANDSHAKE_TIMEOUT` | `10s` | TLS handshake timeout (Go duration) |
+| `FFUUZZ_TLS_DISABLE_SESSION_TICKETS` | `false` | Disable TLS session tickets |
+| `FFUUZZ_CERT_CACHE_MAX_ENTRIES` | `1000` | Certificate LRU cache max entries |
+| `FFUUZZ_CERT_MEMORY_ONLY` | `false` | Keep certs in memory only (no disk) |
+| `FFUUZZ_CERT_CACHE_DIR` | `certs` | Certificate storage directory |
+| `FFUUZZ_LLM_ENABLED` | `false` | Enable LLM-assisted triage |
+| `FFUUZZ_LLM_PROVIDER` | (none) | LLM provider: `anthropic` or `openai` |
+| `FFUUZZ_LLM_API_KEY` | (none) | API key for the LLM provider |
+| `FFUUZZ_LLM_BASE_URL` | (none) | Custom LLM API base URL (for proxies/self-hosted) |
+| `FFUUZZ_LLM_MODEL` | (none) | LLM model name |
+| `FFUUZZ_LLM_MAX_TOKENS` | `4096` | Maximum tokens in LLM response |
+| `FFUUZZ_LLM_TIMEOUT` | `30s` | Timeout for each LLM API call |
 
 ### CLI Flags (`serve` command)
 

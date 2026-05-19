@@ -72,7 +72,8 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 │  Infrastructure                          │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
 │  │  config  │ │  store   │ │ metrics  │ │
-│  │ (env+flag)│ │(cert LRU)│ │(prom.)   │ │
+│  │(env+flag+│ │(cert LRU)│ │(prom.)   │ │
+│  │ dotenv)  │ │          │ │          │ │
 │  └──────────┘ └──────────┘ └──────────┘ │
 │  ┌──────────┐ ┌──────────┐              │
 │  │ replayer │ │   llm    │              │

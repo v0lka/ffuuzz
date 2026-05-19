@@ -20,6 +20,9 @@ FFUZZ is a web application security testing tool that combines MITM proxy traffi
 git clone <repository-url>
 cd ffuuzz
 
+# Configure your environment (copy and edit .env.example)
+cp .env.example .env
+
 # Start PostgreSQL
 docker-compose up -d postgres
 
@@ -32,6 +35,10 @@ make build
 
 - Proxy: `http://localhost:8080`
 - Web UI: `http://localhost:8081`
+
+### Configuration
+
+FFUZZ loads configuration from `.env`, environment variables, and CLI flags (in that priority). Copy `.env.example` to `.env` to get started with all available options and detailed comments. Variable expansion syntax (`${VAR}`) is supported for referencing other environment variables within the file.
 
 ### Development
 

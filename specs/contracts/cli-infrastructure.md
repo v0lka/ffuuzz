@@ -79,7 +79,7 @@ go runFindingGroupingLoop(ctx, findingStore, triage.NewTriager(), 15*time.Second
 
 The wiring happens in `internal/cli/serve.go:runServe()` in the `serve` subcommand. The order is determined by dependency chains:
 
-1. **Config** — must load first, everything depends on it
+1. **Config** — must load first, everything depends on it. Loads `.env` file (optional, supports `${VAR}` expansion), then environment variables (`FFUUZZ_*`), then CLI flags in priority order: CLI > env > `.env` > defaults.
 2. **Database** — must open before any store is created
 3. **Stores** — depend on `*sqlx.DB`
 4. **Corpus Manager** — depends on `RecordingStore` + `CampaignStore`
