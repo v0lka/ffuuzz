@@ -74,9 +74,10 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 │  │  config  │ │  store   │ │ metrics  │ │
 │  │ (env+flag)│ │(cert LRU)│ │(prom.)   │ │
 │  └──────────┘ └──────────┘ └──────────┘ │
-│  ┌──────────┐                           │
-│  │ replayer │                           │
-│  └──────────┘                           │
+│  ┌──────────┐ ┌──────────┐              │
+│  │ replayer │ │   llm    │              │
+│  │          │ │ provider │              │
+│  └──────────┘ └──────────┘              │
 ├─────────────────────────────────────────┤
 │  Utility                                 │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
@@ -118,7 +119,7 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 
 **Single-File Domains**
 - [`domains/anomaly-detection.md`](domains/anomaly-detection.md) — Detector interface, 4 detectors, MultiDetector
-- [`domains/triage.md`](domains/triage.md) — Dedup (signatures), confirmation, minimization (delta-debugging), severity scoring, OWASP categorization, vulnerability grouping
+- [`domains/triage.md`](domains/triage.md) — Dedup (signatures), confirmation, minimization (delta-debugging), severity scoring, OWASP categorization, vulnerability grouping, LLM-assisted analysis
 - [`domains/campaign-management.md`](domains/campaign-management.md) — Campaign CRUD, status lifecycle, SSE streaming
 - [`domains/recordings.md`](domains/recordings.md) — Recording import/export, tree, management
 
@@ -134,5 +135,9 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 - [`decisions/_template.md`](decisions/_template.md) — ADR template
 - [`decisions/001-go-monolith-embedded-spa.md`](decisions/001-go-monolith-embedded-spa.md) — Go monolith with embedded React SPA
 - [`decisions/002-postgresql-persistence.md`](decisions/002-postgresql-persistence.md) — PostgreSQL with sqlx and JSONB
+- [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
+- [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline
+- [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
+- [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline
 - [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
 - [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline

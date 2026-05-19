@@ -26,6 +26,17 @@ type CertCacheConfig struct {
 	CertDir    string `json:"cert_dir"`
 }
 
+// LLMConfig configures the LLM provider for AI-assisted triage.
+type LLMConfig struct {
+	Enabled   bool          `json:"enabled"`
+	Provider  string        `json:"provider"` // "anthropic" or "openai"
+	APIKey    string        `json:"-"`        // never serialized
+	BaseURL   string        `json:"base_url"` // optional override
+	Model     string        `json:"model"`
+	MaxTokens int           `json:"max_tokens"`
+	Timeout   time.Duration `json:"timeout"`
+}
+
 // Config holds the complete application configuration.
 type Config struct {
 	APIAddress      string          `json:"api_address"`
@@ -40,6 +51,7 @@ type Config struct {
 	TLSSkipVerify   bool            `json:"tls_skip_verify"`
 	TLS             TLSConfig       `json:"tls"`
 	CertCache       CertCacheConfig `json:"cert_cache"`
+	LLM             LLMConfig       `json:"llm"`
 }
 
 // DefaultConfig returns a Config populated with safe defaults that work for local
@@ -63,6 +75,11 @@ func DefaultConfig() *Config {
 		CertCache: CertCacheConfig{
 			MaxEntries: 1000,
 			CertDir:    "certs",
+		},
+		LLM: LLMConfig{
+			Enabled:   false,
+			Timeout:   30 * time.Second,
+			MaxTokens: 4096,
 		},
 	}
 }
@@ -121,6 +138,41 @@ func Load(args []string) (*Config, error) {
 		}
 	}
 
+	// LLM configuration
+	if v := os.Getenv("FFUUZZ_LLM_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_LLM_ENABLED=%q: %v\n", v, err)
+		} else {
+			cfg.LLM.Enabled = b
+		}
+	}
+	if v := os.Getenv("FFUUZZ_LLM_PROVIDER"); v != "" {
+		cfg.LLM.Provider = v
+	}
+	if v := os.Getenv("FFUUZZ_LLM_API_KEY"); v != "" {
+		cfg.LLM.APIKey = v
+	}
+	if v := os.Getenv("FFUUZZ_LLM_BASE_URL"); v != "" {
+		cfg.LLM.BaseURL = v
+	}
+	if v := os.Getenv("FFUUZZ_LLM_MODEL"); v != "" {
+		cfg.LLM.Model = v
+	}
+	if v := os.Getenv("FFUUZZ_LLM_MAX_TOKENS"); v != "" {
+		if n, err := strconv.Atoi(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_LLM_MAX_TOKENS=%q: %v\n", v, err)
+		} else if n > 0 {
+			cfg.LLM.MaxTokens = n
+		}
+	}
+	if v := os.Getenv("FFUUZZ_LLM_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_LLM_TIMEOUT=%q: %v\n", v, err)
+		} else {
+			cfg.LLM.Timeout = d
+		}
+	}
+
 	// CLI flags override env
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.StringVar(&cfg.APIAddress, "a", cfg.APIAddress, "Control API listen address")
@@ -133,6 +185,11 @@ func Load(args []string) (*Config, error) {
 	fs.BoolVar(&cfg.CertCache.MemoryOnly, "cert-memory-only", cfg.CertCache.MemoryOnly, "Keep certs in memory only (no disk)")
 	fs.BoolVar(&cfg.TLS.DisableSessionTickets, "tls-no-tickets", cfg.TLS.DisableSessionTickets, "Disable TLS session tickets")
 	fs.BoolVar(&cfg.TLSSkipVerify, "tls-skip-verify", cfg.TLSSkipVerify, "Skip TLS certificate verification for upstream connections")
+
+	// LLM flags
+	fs.BoolVar(&cfg.LLM.Enabled, "llm-enabled", cfg.LLM.Enabled, "Enable LLM-assisted triage")
+	fs.StringVar(&cfg.LLM.Provider, "llm-provider", cfg.LLM.Provider, "LLM provider: anthropic or openai")
+	fs.StringVar(&cfg.LLM.Model, "llm-model", cfg.LLM.Model, "LLM model name")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err

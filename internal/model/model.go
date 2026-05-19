@@ -180,6 +180,26 @@ type FindingDetails struct {
 	HTTPStatus int   `json:"http_status,omitempty"`
 }
 
+// LLMAnalysis holds the structured result of an LLM-based triage analysis.
+type LLMAnalysis struct {
+	// Classification is the vulnerability class, e.g. "SQL Injection" or "No Vulnerability".
+	Classification string `json:"classification"`
+	// Severity is the LLM's severity assessment.
+	Severity Severity `json:"severity"`
+	// Confidence is the LLM's certainty score from 0.0 to 1.0.
+	Confidence float64 `json:"confidence"`
+	// Exploitability is a free-text assessment of exploitability.
+	Exploitability string `json:"exploitability"`
+	// Remediation is the recommended fix.
+	Remediation string `json:"remediation"`
+	// Description is a natural-language summary of the finding.
+	Description string `json:"description"`
+	// AnalyzedAt is when the analysis was performed.
+	AnalyzedAt time.Time `json:"analyzed_at"`
+	// ModelUsed is the LLM model that produced this analysis, for audit trails.
+	ModelUsed string `json:"model_used"`
+}
+
 // Finding is an anomaly discovered during a fuzzing campaign.
 type Finding struct {
 	ID                  string         `json:"id" db:"id"`
@@ -207,6 +227,10 @@ type Finding struct {
 
 	// DB-only JSONB
 	DetailsJSON []byte `json:"-" db:"details"`
+
+	// LLM analysis (optional enrichment from AI triage)
+	LLMAnalysis     *LLMAnalysis `json:"llm_analysis,omitempty"`
+	LLMAnalysisJSON []byte       `json:"-" db:"llm_analysis"`
 }
 
 // Artifact references a stored file containing the full reproduction payload.
@@ -233,17 +257,17 @@ const (
 type OWASPCategory string
 
 const (
-	OWASPCatA01BrokenAccessControl       OWASPCategory = "A01_BROKEN_ACCESS_CONTROL"
-	OWASPCatA02SecurityMisconfiguration  OWASPCategory = "A02_SECURITY_MISCONFIGURATION"
-	OWASPCatA03SoftwareSupplyChain       OWASPCategory = "A03_SOFTWARE_SUPPLY_CHAIN"
-	OWASPCatA04CryptographicFailures     OWASPCategory = "A04_CRYPTOGRAPHIC_FAILURES"
-	OWASPCatA05Injection                 OWASPCategory = "A05_INJECTION"
-	OWASPCatA06InsecureDesign            OWASPCategory = "A06_INSECURE_DESIGN"
-	OWASPCatA07AuthenticationFailures    OWASPCategory = "A07_AUTHENTICATION_FAILURES"
-	OWASPCatA08SoftwareDataIntegrity     OWASPCategory = "A08_SOFTWARE_DATA_INTEGRITY"
-	OWASPCatA09SecurityLoggingAlerting   OWASPCategory = "A09_SECURITY_LOGGING_ALERTING"
-	OWASPCatA10ExceptionalConditions     OWASPCategory = "A10_EXCEPTIONAL_CONDITIONS"
-	OWASPCatUncategorized                OWASPCategory = "UNCATEGORIZED"
+	OWASPCatA01BrokenAccessControl      OWASPCategory = "A01_BROKEN_ACCESS_CONTROL"
+	OWASPCatA02SecurityMisconfiguration OWASPCategory = "A02_SECURITY_MISCONFIGURATION"
+	OWASPCatA03SoftwareSupplyChain      OWASPCategory = "A03_SOFTWARE_SUPPLY_CHAIN"
+	OWASPCatA04CryptographicFailures    OWASPCategory = "A04_CRYPTOGRAPHIC_FAILURES"
+	OWASPCatA05Injection                OWASPCategory = "A05_INJECTION"
+	OWASPCatA06InsecureDesign           OWASPCategory = "A06_INSECURE_DESIGN"
+	OWASPCatA07AuthenticationFailures   OWASPCategory = "A07_AUTHENTICATION_FAILURES"
+	OWASPCatA08SoftwareDataIntegrity    OWASPCategory = "A08_SOFTWARE_DATA_INTEGRITY"
+	OWASPCatA09SecurityLoggingAlerting  OWASPCategory = "A09_SECURITY_LOGGING_ALERTING"
+	OWASPCatA10ExceptionalConditions    OWASPCategory = "A10_EXCEPTIONAL_CONDITIONS"
+	OWASPCatUncategorized               OWASPCategory = "UNCATEGORIZED"
 )
 
 // ArtifactPayload is the JSON structure written to artifact files.

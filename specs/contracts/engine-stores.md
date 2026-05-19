@@ -25,6 +25,7 @@ type FindingStore interface {
     GetByID(ctx context.Context, id string) (*model.Finding, error)
     ClaimNextReproduceJob(ctx context.Context) (string, int, bool, error)
     SetReproduceStatus(ctx context.Context, id, status string) error
+    UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 }
 
 // GroupingStore — extends FindingStore with grouping operations for vulnerability grouping.
@@ -60,6 +61,7 @@ type ArtifactStore interface {
 | Reproduce jobs | `ClaimNextReproduceJob`, `SetReproduceStatus` | `UpdateReproduceStatus` |
 | Count by type | — | `CountByType` |
 | Group findings | `UpdateFindingGroup` (GroupingStore) | `UpdateFindingGroup` |
+| LLM analysis | `UpdateLLMAnalysis` | `UpdateLLMAnalysis` |
 
 The engine has a narrower interface focused on write-heavy campaign execution, but the `GroupingStore` extension adds `ListAll` for vulnerability grouping at campaign stop.
 
@@ -139,6 +141,20 @@ Periodic grouping (15s loop):
     │
     └── findings.UpdateFindingGroup(ctx, findingID, groupID)
         └── SQL: UPDATE findings SET group_id=$1 WHERE id=$2
+        └── Returns error
+
+Post-campaign LLM batch analysis:
+    │
+    ├── findings.ListAll(ctx, campaignID, "", "UNCONFIRMED", nil, 10000, 0)
+    │   └── SQL: SELECT * FROM findings WHERE campaign_id=$1 AND status='UNCONFIRMED'
+    │   └── Returns []Finding
+    │
+    ├── artifacts.GetByFindingID(ctx, findingID)
+    │   └── SQL: SELECT * FROM artifacts WHERE finding_id=$1
+    │   └── Returns *Artifact → file read from disk → ArtifactPayload
+    │
+    └── findings.UpdateLLMAnalysis(ctx, findingID, analysisJSON)
+        └── SQL: UPDATE findings SET llm_analysis=$1 WHERE id=$2
         └── Returns error
 ```
 

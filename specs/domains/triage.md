@@ -2,13 +2,15 @@
 
 ## Overview
 
-Handles deduplication, confirmation, minimization, severity scoring, OWASP categorization, and vulnerability grouping of findings discovered during fuzzing. After a worker detects an anomaly, the triage system generates a stable signature to check for duplicates, assigns severity and OWASP category at creation time, re-sends the mutated request N times to confirm the finding is reproducible, re-scores severity with actual reproducibility, and then attempts to minimize the session and body (removing unnecessary exchanges and fields via delta-debugging). Minimization supports JSON, URL-encoded query params, XML, and multipart/form-data bodies.
+Handles deduplication, confirmation, minimization, severity scoring, OWASP categorization, vulnerability grouping, and LLM-assisted analysis of findings discovered during fuzzing. After a worker detects an anomaly, the triage system generates a stable signature to check for duplicates, assigns severity and OWASP category at creation time, re-sends the mutated request N times to confirm the finding is reproducible, re-scores severity with actual reproducibility, and then attempts to minimize the session and body (removing unnecessary exchanges and fields via delta-debugging). Minimization supports JSON, URL-encoded query params, XML, and multipart/form-data bodies. When configured, LLM analysis classifies findings, generates human-readable descriptions, and produces executive summary reports.
 
 ## Key Files
 
 | File | Role |
 |------|------|
 | `internal/triage/triage.go` | `Triager` struct with signature, confirm, minimize, severity, categorization, grouping |
+| `internal/triage/llm.go` | `LLMTriager` struct: orchestrate LLM-based finding analysis and batch processing |
+| `internal/triage/llm_provider.go` | `LLMProvider` interface and request/input types |
 
 ## Core Types
 
@@ -20,6 +22,49 @@ type SessionReplayer interface {
     ReplaySession(ctx context.Context, session model.RecordingSession,
         baseURL string, wctx *replayer.WorkerContext,
         logger zerolog.Logger) ([]replayer.ExchangeResult, error)
+}
+
+// LLMTriager orchestrates LLM-based analysis of fuzzing findings.
+// All methods are no-ops when the provider is nil (LLM not configured).
+type LLMTriager struct {
+    provider LLMProvider
+    logger   zerolog.Logger
+}
+
+// LLMProvider defines the interface for LLM-based finding analysis.
+// Consumer (internal/triage) owns this interface; implementations live in internal/llm/.
+type LLMProvider interface {
+    AnalyzeFinding(ctx, LLMAnalysisRequest) (*model.LLMAnalysis, error)
+    GenerateDescription(ctx, LLMDescriptionRequest) (string, error)
+    GenerateReport(ctx, []LLMReportInput) (string, error)
+}
+
+type LLMAnalysisRequest struct {
+    FindingID       string
+    FindingType     string
+    Method          string
+    Endpoint        string
+    MutationType    string
+    MutationPayload string
+    BaselineStatus  int
+    AnomalousStatus int
+    ResponseSnippet string // truncated response body (~2000 chars)
+}
+
+type LLMDescriptionRequest struct {
+    Classification string
+    Endpoint       string
+    Severity       string
+    MutationType   string
+}
+
+type LLMReportInput struct {
+    ID             string
+    Endpoint       string
+    Type           string
+    Severity       string
+    Classification string
+    Description    string
 }
 ```
 
@@ -80,6 +125,21 @@ Standalone helper. For JSON bodies: decodes, sorts keys, replaces values with ty
 
 ### `HasJSONBody(ex Exchange) bool`
 Standalone helper. Checks content-type header and body structure.
+
+### `LLM: AnalyzeFinding(ctx, finding, artifactData) (*model.LLMAnalysis, error)`
+Sends finding context (type, endpoint, mutation, response snippet, baseline/anomalous status) to the configured LLM provider. Returns a structured `LLMAnalysis` with classification, severity, confidence (0.0-1.0), exploitability assessment, and remediation advice. No-op when LLM is disabled (provider is nil). Logs a warning on LLM failure.
+
+### `LLM: GenerateDescription(ctx, finding) (string, error)`
+Produces a concise human-readable description of a finding for UI display. Uses the finding's existing `LLMAnalysis` classification as context. No-op when LLM is disabled.
+
+### `LLM: BatchAnalyze(ctx, findings, artifactGetter, onResult)`
+Iterates over a slice of findings, loading artifact data via `artifactGetter` and calling `AnalyzeFinding` for each. Calls `onResult(findingID, analysis)` for each successfully analyzed finding so the caller can persist results. Respects context cancellation between findings. Logs progress every 10 findings. No-op when LLM is disabled.
+
+### `LLM: GenerateReport(ctx, findings) (string, error)`
+Produces an executive summary and recommendations from a set of finding summaries (ID, endpoint, type, severity, classification). No-op when LLM is disabled.
+
+### `LLM: MarshalAnalysis(a *model.LLMAnalysis) []byte`
+Serializes an `LLMAnalysis` to JSON bytes for database storage. Returns `nil` when input is `nil` or marshaling fails.
 
 ## Flow
 
@@ -206,14 +266,18 @@ Severity thresholds: `CRITICAL` ≥ 0.8, `HIGH` ≥ 0.6, `MEDIUM` ≥ 0.4, `LOW`
 - Severity is scored twice: at finding creation (reproducibility=0, conservative) and after confirmation (actual reproducibility). This ensures the final displayed severity reflects real-world reproducibility.
 - `GroupFindings` uses a composite key: `Type|MutationPrefix|EndpointPattern|HTTPStatusRange`. The endpoint pattern is always just the first path segment (or "root" for "/").
 - Grouping is applied at campaign stop and periodically every 15s via a background goroutine. Only ungrouped confirmed findings (`GroupID == nil`) are processed.
+- `LLMTriager` is a graceful no-op when the provider is nil (LLM not configured). All methods return zero values without error.
+- `BatchAnalyze` respects context cancellation between individual finding analyses, allowing partial batches to complete safely.
+- `MarshalAnalysis` returns `nil` on marshaling failure (graceful degradation, logged by callers).
 
 ## Dependencies
 
 | Package | Used for |
 |---------|----------|
 | `internal/anomaly` | `AnomalyHit`, `Detector`, `BaselineEntry` |
-| `internal/model` | `RecordingSession`, `Exchange`, `AnomalyConfig`, `FindingType`, `Finding`, `Severity`, `OWASPCategory` |
+| `internal/model` | `RecordingSession`, `Exchange`, `AnomalyConfig`, `FindingType`, `Finding`, `Severity`, `OWASPCategory`, `LLMAnalysis` |
 | `internal/replayer` | `ExchangeResult`, `WorkerContext`, `SessionReplayer` |
+| `encoding/json` | LLM analysis serialization in `MarshalAnalysis` |
 | `encoding/xml` | XML parsing/serialization for `MinimizeXMLBody` |
 | `mime/multipart` | Multipart parsing for `MinimizeMultipartBody` |
 | `net/http` | Content-type header parsing for `GetContentType` |

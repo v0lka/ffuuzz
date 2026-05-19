@@ -19,6 +19,7 @@ import (
 	"ffuuzz/internal/httputil"
 	"ffuuzz/internal/metrics"
 	"ffuuzz/internal/model"
+	"ffuuzz/internal/triage"
 )
 
 // RecordingStore defines the recording operations needed by the API.
@@ -48,6 +49,7 @@ type FindingStore interface {
 	GetByID(ctx context.Context, id string) (*model.Finding, error)
 	UpdateReproduceStatus(ctx context.Context, id, status string, runs int) error
 	UpdateFindingGroup(ctx context.Context, id, groupID string) error
+	UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 	CountByType(ctx context.Context, campaignID string) (map[model.FindingType]int, error)
 }
 
@@ -71,6 +73,7 @@ type Server struct {
 	artifacts   ArtifactStore
 	engine      *engine.Engine
 	health      HealthChecker
+	llmTriager  *triage.LLMTriager
 	artifactDir string
 	webFS       fs.FS
 	logger      zerolog.Logger
@@ -85,6 +88,7 @@ type ServerConfig struct {
 	Artifacts   ArtifactStore
 	Engine      *engine.Engine
 	Health      HealthChecker
+	LLMTriager  *triage.LLMTriager
 	ArtifactDir string
 	WebFS       fs.FS // Embedded SPA assets (nil = SPA disabled)
 	Logger      zerolog.Logger
@@ -104,6 +108,7 @@ func NewServer(cfg ServerConfig) *Server {
 		artifacts:   cfg.Artifacts,
 		engine:      cfg.Engine,
 		health:      cfg.Health,
+		llmTriager:  cfg.LLMTriager,
 		artifactDir: cfg.ArtifactDir,
 		webFS:       cfg.WebFS,
 		logger:      cfg.Logger,
@@ -140,12 +145,14 @@ func NewServer(cfg ServerConfig) *Server {
 		v1.POST("/campaigns/:id/start", s.startCampaign)
 		v1.POST("/campaigns/:id/stop", s.stopCampaign)
 		v1.POST("/campaigns/:id/recordings", s.addRecordingsToCampaign)
+		v1.POST("/campaigns/:id/analyze", s.analyzeCampaign)
 
 		// Findings
 		v1.GET("/findings", s.listFindings)
 		v1.GET("/findings/:id", s.getFinding)
 		v1.GET("/findings/:id/artifact", s.getFindingArtifact)
 		v1.POST("/findings/:id/reproduce", s.reproduceFinding)
+		v1.POST("/findings/:id/analyze", s.analyzeFinding)
 	}
 
 	// Root redirect → SPA

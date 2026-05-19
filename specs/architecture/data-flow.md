@@ -186,7 +186,8 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
    - **Triages** findings: deduplicates by signature, assigns severity and OWASP category, confirms by re-sending N times, re-scores severity with actual reproducibility, minimizes the session and body (JSON/query-params/XML/multipart).
    - **Persists** findings and artifacts to PostgreSQL.
 4. **SSE Streaming** (`internal/api/` streams campaign stats (tests done, findings per type, last activity) to connected clients.
-5. **Reproduce Worker** (`internal/engine/reproduce.go`) polls for enqueued reproduce jobs and replays the finding's artifact session against the target.
+5. **LLM Analysis (API-initiated)** — Two endpoints allow on-demand LLM analysis: `POST /api/v1/findings/:id/analyze` analyzes a single finding, and `POST /api/v1/campaigns/:id/analyze` batch-analyzes all unconfirmed findings in a campaign. Both return HTTP 503 when LLM is disabled.
+6. **Reproduce Worker** (`internal/engine/reproduce.go`) polls for enqueued reproduce jobs and replays the finding's artifact session against the target.
 6. **Vulnerability Grouping** — At campaign stop, confirmed findings are grouped by type/mutation/endpoint/status-range and assigned a shared `GroupID`. A background goroutine also groups periodically every 15s.
 
 ### Shutdown Phase
@@ -220,4 +221,5 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
 - [`layers.md`](layers.md) — layer architecture and import rules
 - [`security-model.md`](security-model.md) — TLS interception details
 - [`domains/traffic-capture/README.md`](../domains/traffic-capture/README.md) — proxy and recorder domain
+- [`domains/fuzzing-engine/README.md`](../domains/fuzzing-engine/README.md) — engine, mutate, replay domain
 - [`domains/fuzzing-engine/README.md`](../domains/fuzzing-engine/README.md) — engine, mutate, replay domain

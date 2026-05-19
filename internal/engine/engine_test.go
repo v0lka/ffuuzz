@@ -73,6 +73,10 @@ func (m *mockFindingStore) SetReproduceStatus(ctx context.Context, id, status st
 	return nil
 }
 
+func (m *mockFindingStore) UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error {
+	return nil
+}
+
 type mockArtifactStore struct {
 	createFn func(ctx context.Context, a model.Artifact) error
 }
@@ -93,7 +97,7 @@ func TestNewEngine(t *testing.T) {
 	as := &mockArtifactStore{}
 	logger := zerolog.Nop()
 
-	e := NewEngine(cs, fs, as, nil, "/tmp/artifacts", logger)
+	e := NewEngine(cs, fs, as, nil, nil, "/tmp/artifacts", logger)
 	if e == nil {
 		t.Fatal("expected non-nil Engine")
 	}
@@ -115,14 +119,14 @@ func TestNewEngine(t *testing.T) {
 }
 
 func TestIsRunning_NotRunning(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	if e.IsRunning("nonexistent") {
 		t.Error("expected IsRunning=false for non-existent campaign")
 	}
 }
 
 func TestIsRunning_Running(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	e.mu.Lock()
 	e.running["camp-1"] = func() {}
 	e.mu.Unlock()
@@ -133,7 +137,7 @@ func TestIsRunning_Running(t *testing.T) {
 }
 
 func TestStopCampaign_NotRunning(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	err := e.StopCampaign(context.Background(), "nonexistent")
 	if err == nil {
 		t.Error("expected error for non-running campaign")
@@ -147,7 +151,7 @@ func TestStopCampaign_Running(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.mu.Lock()
@@ -177,7 +181,7 @@ func TestStopCampaign_UpdateStatusError(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 
 	e.mu.Lock()
 	e.running["camp-1"] = func() {}
@@ -196,7 +200,7 @@ func TestStopAll(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 
 	e.mu.Lock()
 	e.running["c1"] = func() { cancelledIDs["c1"] = true }
@@ -224,7 +228,7 @@ func TestFailCampaign(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	e.failCampaign(context.Background(), "camp-1", model.CampaignStarting, context.DeadlineExceeded)
 
 	if !updateCalled {
@@ -238,7 +242,7 @@ func TestStartCampaign_UpdateStatusFails(t *testing.T) {
 			return false, context.DeadlineExceeded
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	campaign := &model.Campaign{ID: "c1", Status: model.CampaignCreated}
 	err := e.StartCampaign(context.Background(), campaign)
 	if err == nil {
@@ -252,7 +256,7 @@ func TestStartCampaign_NotExpectedState(t *testing.T) {
 			return false, nil // not in expected state
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
 	campaign := &model.Campaign{ID: "c1", Status: model.CampaignCreated}
 	err := e.StartCampaign(context.Background(), campaign)
 	if err == nil {
@@ -271,7 +275,7 @@ func TestRunCampaign_MaxTests(t *testing.T) {
 	cs := &mockCampaignStore{}
 	fs := &mockFindingStore{}
 	as := &mockArtifactStore{}
-	e := NewEngine(cs, fs, as, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, as, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -311,7 +315,7 @@ func TestRunCampaign_DurationLimit(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -341,7 +345,7 @@ func TestRunCampaign_ContextCancelled(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -369,7 +373,7 @@ func TestRunCampaign_WithRateLimit(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -394,7 +398,7 @@ func TestRunCampaign_WithSequenceMutation(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -425,7 +429,7 @@ func TestRunCampaign_DefaultWorkers(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -453,7 +457,7 @@ func TestRunCampaign_Anomaly5xxDetection(t *testing.T) {
 		},
 	}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -491,7 +495,7 @@ func TestRunCampaign_WithConfirmation(t *testing.T) {
 		},
 	}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -515,7 +519,7 @@ func TestRunCampaign_WithMinimization(t *testing.T) {
 
 	fs := &mockFindingStore{}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},

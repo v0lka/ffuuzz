@@ -4,8 +4,11 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -34,6 +37,7 @@ type FindingStore interface {
 	GetByID(ctx context.Context, id string) (*model.Finding, error)
 	ClaimNextReproduceJob(ctx context.Context) (string, int, bool, error)
 	SetReproduceStatus(ctx context.Context, id, status string) error
+	UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 }
 
 // GroupingStore extends FindingStore with grouping operations for vulnerability grouping.
@@ -55,6 +59,7 @@ type Engine struct {
 	findings    FindingStore
 	artifacts   ArtifactStore
 	corpus      *corpus.Manager
+	llmTriager  *triage.LLMTriager
 	artifactDir string
 	logger      zerolog.Logger
 
@@ -71,6 +76,7 @@ func NewEngine(
 	findings FindingStore,
 	artifacts ArtifactStore,
 	corpus *corpus.Manager,
+	llmTriager *triage.LLMTriager,
 	artifactDir string,
 	logger zerolog.Logger,
 ) *Engine {
@@ -79,6 +85,7 @@ func NewEngine(
 		findings:    findings,
 		artifacts:   artifacts,
 		corpus:      corpus,
+		llmTriager:  llmTriager,
 		artifactDir: artifactDir,
 		logger:      logger,
 		running:     make(map[string]context.CancelFunc),
@@ -367,6 +374,52 @@ func (e *Engine) runCampaign(
 				}
 			}
 			logger.Info().Int("groups", len(groups)).Int("findings", len(findings)).Msg("grouping complete")
+		}
+	}
+
+	// Post-campaign LLM batch analysis of unconfirmed findings
+	if e.llmTriager != nil {
+		artifactGetter := func(findingID string) (*model.ArtifactPayload, error) {
+			artifact, err := e.artifacts.GetByFindingID(context.Background(), findingID)
+			if err != nil {
+				return nil, err
+			}
+			filePath := filepath.Join(e.artifactDir, artifact.FilePath)
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return nil, err
+			}
+			var payload model.ArtifactPayload
+			if err := json.Unmarshal(data, &payload); err != nil {
+				return nil, err
+			}
+			return &payload, nil
+		}
+
+		llmCtx, llmCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer llmCancel()
+
+		var llmFindings []model.Finding
+		if gs, ok := e.findings.(GroupingStore); ok {
+			var err error
+			llmFindings, err = gs.ListAll(llmCtx, campaignID, "", string(model.FindingUnconfirmed), nil, 10000, 0)
+			if err != nil {
+				logger.Warn().Err(err).Msg("llm batch: list findings failed")
+			}
+		}
+
+		if len(llmFindings) > 0 {
+			logger.Info().Int("count", len(llmFindings)).Msg("starting llm batch analysis")
+			e.llmTriager.BatchAnalyze(llmCtx, llmFindings, artifactGetter, func(findingID string, analysis *model.LLMAnalysis) {
+				jsonData, err := triage.MarshalAnalysis(analysis)
+				if err != nil {
+					logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: marshal analysis failed")
+					return
+				}
+				if err := e.findings.UpdateLLMAnalysis(context.Background(), findingID, jsonData); err != nil {
+					logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: persist analysis failed")
+				}
+			})
 		}
 	}
 }

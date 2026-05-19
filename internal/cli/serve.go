@@ -19,6 +19,7 @@ import (
 	"ffuuzz/internal/db"
 	"ffuuzz/internal/endpoint"
 	"ffuuzz/internal/engine"
+	"ffuuzz/internal/llm"
 	"ffuuzz/internal/logging"
 	"ffuuzz/internal/mitm"
 	"ffuuzz/internal/model"
@@ -48,6 +49,19 @@ func (c *CLI) runServe(args []string) int {
 	findingStore := db.NewFindingStore(database.DB, logger)
 	artifactStore := db.NewArtifactStore(database.DB, logger)
 
+	// LLM provider setup (graceful degradation when disabled)
+	llmProvider, err := llm.NewProvider(cfg.LLM, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to create llm provider")
+	}
+	var llmTriager *triage.LLMTriager
+	if llmProvider != nil {
+		llmTriager = triage.NewLLMTriager(llmProvider, logger)
+		logger.Info().Str("provider", cfg.LLM.Provider).Str("model", cfg.LLM.Model).Msg("llm triage enabled")
+	} else {
+		logger.Info().Msg("llm triage disabled")
+	}
+
 	corpusMgr := corpus.NewManager(recordingStore, campaignStore, logger)
 
 	eng := engine.NewEngine(
@@ -55,6 +69,7 @@ func (c *CLI) runServe(args []string) int {
 		findingStore,
 		artifactStore,
 		corpusMgr,
+		llmTriager,
 		cfg.ArtifactDir,
 		logger,
 	)
@@ -106,6 +121,7 @@ func (c *CLI) runServe(args []string) int {
 		Artifacts:   artifactStore,
 		Engine:      eng,
 		Health:      database,
+		LLMTriager:  llmTriager,
 		ArtifactDir: cfg.ArtifactDir,
 		WebFS:       webFS,
 		Logger:      logger,

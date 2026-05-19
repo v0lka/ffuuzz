@@ -18,8 +18,8 @@ type SeedInterestTracker struct {
 
 type seedStats struct {
 	interest    float64
-	statusCodes map[int]int      // seen status → count
-	errorSigs   map[string]int   // error body signature → count
+	statusCodes map[int]int    // seen status → count
+	errorSigs   map[string]int // error body signature → count
 	lastSeen    time.Time
 }
 

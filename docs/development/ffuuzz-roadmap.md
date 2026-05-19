@@ -240,14 +240,14 @@
 - **Feedback loop**: UI элемент "Mark as False Positive" / "Confirm Real" → записывается в DB → используется для ре-обучения моделей
 - **Clustering similar findings**: unsupervised clustering (DBSCAN на embedding-ах findings) для автоматической группировки related findings
 
-### 7.3 LLM-based триаж
+### ~~7.3 LLM-based триаж~~
 
-**Реализация**:
+~~**Реализация**:~~
 
-- **LLM triage agent**: для каждого finding → отправка (request, mutated_request, baseline_response, anomalous_response) в LLM с structured prompt; output: vulnerability classification, severity, exploitability assessment, recommended remediation
-- **Batch LLM analysis**: после завершения кампании -- batch-обработка всех UNCONFIRMED findings через LLM для приоритизации human review
-- **Natural language finding description**: LLM генерирует human-readable описание каждого finding (что произошло, почему это может быть уязвимостью, как воспроизвести)
-- **LLM-assisted report generation**: генерация executive summary и technical details из набора findings
+- ~~**LLM triage agent**: для каждого finding → отправка (request, mutated_request, baseline_response, anomalous_response) в LLM с structured prompt; output: vulnerability classification, severity, exploitability assessment, recommended remediation~~
+- ~~**Batch LLM analysis**: после завершения кампании -- batch-обработка всех UNCONFIRMED findings через LLM для приоритизации human review~~
+- ~~**Natural language finding description**: LLM генерирует human-readable описание каждого finding (что произошло, почему это может быть уязвимостью, как воспроизвести)~~
+- ~~**LLM-assisted report generation**: генерация executive summary и technical details из набора findings~~
 
 ---
 

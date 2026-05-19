@@ -744,10 +744,10 @@ func TestFuzzStrings_Shared(t *testing.T) {
 		// SSRF
 		"http://169.254.169.254/latest/meta-data/": false,
 		// Command injection
-		"`id`":       false,
-		"$(whoami)":  false,
+		"`id`":      false,
+		"$(whoami)": false,
 		// Prototype pollution
-		"__proto__":  false,
+		"__proto__":   false,
 		"constructor": false,
 	}
 	for _, s := range fuzzStrings {

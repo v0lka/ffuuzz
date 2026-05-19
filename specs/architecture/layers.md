@@ -78,6 +78,7 @@ FFUUZZ follows a strict 4-layer architecture where dependencies flow downward: B
 | `internal/store` | Infrastructure | TLS certificate management: root CA generation, leaf cert LRU cache, disk persistence, `singleflight` dedup. |
 | `internal/config` | Infrastructure | Configuration loading from env vars (`FFUUZZ_*`) and CLI flags. `DefaultConfig()` with production-safe defaults. |
 | `internal/metrics` | Infrastructure | Prometheus metrics in a custom registry. Counters, histograms for tests, findings, cert cache, endpoints. |
+| `internal/llm` | Infrastructure | LLM provider abstraction: OpenAI and Anthropic backends. Factory (`NewProvider`) supports graceful degradation when disabled. |
 | `internal/logging` | Utility | Zerolog factory. Context helpers for request/campaign/recording IDs. Zero internal deps. |
 | `internal/httputil` | Utility | HTTP helpers: hop-by-hop header removal, limited body buffers, tee readers, request IDs, server construction. |
 | `internal/diff` | Utility | Structural diff between two `TxRecord`s (URL + status comparison). |
@@ -110,6 +111,12 @@ These are invariants enforced by the Go compiler (all packages are `internal/`):
 - **DO NOT** create new wiring functions outside `internal/cli/serve.go`. The composition root is the single source of truth for dependency injection.
 - **DO NOT** import `internal/config` from domain packages. Domain logic must be configurable through parameters, not by reading config directly.
 - **DO NOT** add new packages that bypass the layer structure. Every new package must fit into Boundary, Domain, Infrastructure, or Utility.
+
+## Related
+
+- [`data-flow.md`](data-flow.md) — end-to-end request lifecycle across layers
+- [`security-model.md`](security-model.md) — TLS interception and certificate management
+- [`contracts/cli-infrastructure.md`](../contracts/cli-infrastructure.md) — how the CLI wires infrastructure at startup
 
 ## Related
 

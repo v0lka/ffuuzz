@@ -38,6 +38,7 @@ type FindingStore interface {
     UpdateReproduceStatus(ctx context.Context, id, status string, runs int) error
     CountByType(ctx context.Context, campaignID string) (map[model.FindingType]int, error)
     UpdateFindingGroup(ctx context.Context, id, groupID string) error
+    UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 }
 
 // ArtifactStore — artifact queries
@@ -100,6 +101,10 @@ API Handler
     │
     ├── findingStore.UpdateFindingGroup(ctx, id, groupID)
     │   └── SQL: UPDATE findings SET group_id=$1 WHERE id=$2
+    │   └── Returns error
+    │
+    ├── findingStore.UpdateLLMAnalysis(ctx, id, analysisJSON)
+    │   └── SQL: UPDATE findings SET llm_analysis=$1 WHERE id=$2
     │   └── Returns error
     │
     └── health.Ping(ctx)

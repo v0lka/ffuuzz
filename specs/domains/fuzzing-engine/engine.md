@@ -12,6 +12,7 @@ type Engine struct {
     findings    FindingStore
     artifacts   ArtifactStore
     corpus      *corpus.Manager
+    llmTriager  *triage.LLMTriager
     artifactDir string
     logger      zerolog.Logger
     mu          sync.Mutex
@@ -36,6 +37,7 @@ type FindingStore interface {
     GetByID(ctx context.Context, id string) (*model.Finding, error)
     ClaimNextReproduceJob(ctx context.Context) (string, int, bool, error)
     SetReproduceStatus(ctx context.Context, id, status string) error
+    UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 }
 
 // ArtifactStore defines the artifact operations needed by the engine.
@@ -145,6 +147,9 @@ Spawns the background reproduce-finding polling goroutine. Called once at applic
 15. UpdateStatus → FINISHED (or STOPPED if ctx cancelled)
 16. Vulnerability grouping (if store implements GroupingStore):
     └─ List all CONFIRMED findings → GroupFindings() → UpdateFindingGroup() per finding
+17. Post-campaign LLM batch analysis (if llmTriager is not nil):
+    └─ List all UNCONFIRMED findings → load artifact from disk → BatchAnalyze() → persist via UpdateLLMAnalysis()
+    └─ Runs with a 10-minute timeout context
 ```
 
 ### Worker Loop
@@ -259,6 +264,7 @@ func (w *ReproduceWorker) Run(ctx context.Context)
 - `SeedInterestTracker` scores start at 1.0 (default weight). Seeds always have a non-zero probability of being selected, guaranteeing coverage of all seeds.
 - When only one seed exists, epsilon-greedy degrades to uniform random (no weighted selection possible with a single seed).
 - Vulnerability grouping is run at campaign stop via type assertion on `e.findings.(GroupingStore)`. If the store does not implement `GroupingStore` (e.g., mock stores in tests), grouping is silently skipped. A background goroutine in `cli/serve.go` also groups periodically every 15s.
+- Post-campaign LLM batch analysis runs only when `llmTriager` is not nil (LLM is configured and enabled). It uses a separate 10-minute timeout context and lists only UNCONFIRMED findings. Artifacts are loaded from disk via `artifactGetter`. Each analysis result is persisted via `UpdateLLMAnalysis` using a fresh context (not the timeout context) so persistence is not affected by the LLM timeout.
 
 ## Dependencies
 
@@ -269,8 +275,10 @@ func (w *ReproduceWorker) Run(ctx context.Context)
 | `internal/model` | `Campaign`, `CampaignConfig`, `CampaignStatus`, `Finding`, `Artifact` |
 | `internal/mutate` | `Pipeline`, `SeqMutator`, `Config` |
 | `internal/replayer` | `Replayer`, `ExchangeResult`, `WorkerContext`, `ExtractionRule` |
-| `internal/triage` | `Triager` for dedup, confirm, minimize, severity, categorization, grouping |
+| `internal/triage` | `Triager` for dedup, confirm, minimize, severity, categorization, grouping; `LLMTriager` for post-campaign LLM batch analysis |
 | `internal/metrics` | `TestsTotal`, `FindingsTotal` |
+| `encoding/json` | Artifact payload deserialization for LLM analysis |
+| `os` | Artifact file read for LLM batch |
 
 ## Edge Cases
 

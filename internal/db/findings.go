@@ -49,20 +49,22 @@ type findingRow struct {
 	OWASPCategory       string         `db:"owasp_category"`
 	GroupID             sql.NullString `db:"group_id"`
 	Reproducibility     float64        `db:"reproducibility"`
+	LLMAnalysis         []byte         `db:"llm_analysis"`
 }
 
 func (r findingRow) toModel(logger zerolog.Logger) model.Finding {
 	f := model.Finding{
-		ID:          r.ID,
-		CampaignID:  r.CampaignID,
-		Type:        model.FindingType(r.Type),
-		Status:      model.FindingStatus(r.Status),
-		Signature:   r.Signature,
-		CreatedAt:   r.CreatedAt,
-		Method:      r.Method,
-		Endpoint:    r.Endpoint,
-		Minimized:   r.Minimized,
-		DetailsJSON: r.Details,
+		ID:              r.ID,
+		CampaignID:      r.CampaignID,
+		Type:            model.FindingType(r.Type),
+		Status:          model.FindingStatus(r.Status),
+		Signature:       r.Signature,
+		CreatedAt:       r.CreatedAt,
+		Method:          r.Method,
+		Endpoint:        r.Endpoint,
+		Minimized:       r.Minimized,
+		DetailsJSON:     r.Details,
+		LLMAnalysisJSON: r.LLMAnalysis,
 	}
 	if r.ConfirmedAt.Valid {
 		f.ConfirmedAt = &r.ConfirmedAt.Time
@@ -94,6 +96,14 @@ func (r findingRow) toModel(logger zerolog.Logger) model.Finding {
 			logger.Warn().Err(err).Str("finding_id", r.ID).Msg("unmarshal finding details failed")
 		}
 	}
+	if len(r.LLMAnalysis) > 0 {
+		var a model.LLMAnalysis
+		if err := json.Unmarshal(r.LLMAnalysis, &a); err != nil {
+			logger.Warn().Err(err).Str("finding_id", r.ID).Msg("unmarshal llm analysis failed")
+		} else {
+			f.LLMAnalysis = &a
+		}
+	}
 	return f
 }
 
@@ -102,6 +112,14 @@ func (s *FindingStore) Create(ctx context.Context, f model.Finding) error {
 	detailsJSON, err := json.Marshal(f.Details)
 	if err != nil {
 		return fmt.Errorf("marshal details: %w", err)
+	}
+
+	var llmAnalysisJSON []byte
+	if f.LLMAnalysis != nil {
+		llmAnalysisJSON, err = json.Marshal(f.LLMAnalysis)
+		if err != nil {
+			return fmt.Errorf("marshal llm_analysis: %w", err)
+		}
 	}
 
 	var seedRec sql.NullString
@@ -118,11 +136,11 @@ func (s *FindingStore) Create(ctx context.Context, f model.Finding) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload, severity, owasp_category, reproducibility)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload, severity, owasp_category, reproducibility, llm_analysis)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 		f.ID, f.CampaignID, string(f.Type), string(f.Status), f.Signature,
 		f.CreatedAt, f.Method, f.Endpoint, detailsJSON, seedRec, f.Minimized, mutationType, mutationPayload,
-		string(f.Severity), string(f.OWASPCategory), f.Reproducibility,
+		string(f.Severity), string(f.OWASPCategory), f.Reproducibility, llmAnalysisJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("insert finding: %w", err)
@@ -174,7 +192,7 @@ func (s *FindingStore) GetByID(ctx context.Context, id string) (*model.Finding, 
 			method, endpoint, details, seed_recording_id, minimized,
 			reproduce_status, reproduce_enqueued_at, reproduce_runs,
 			mutation_type, mutation_payload,
-			severity, owasp_category, group_id, reproducibility
+			severity, owasp_category, group_id, reproducibility, llm_analysis
 		 FROM findings WHERE id = $1`, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -236,7 +254,7 @@ func (q *findingsQuery) build(limit, offset int) (string, []any) {
 		f.method, f.endpoint, f.details, f.seed_recording_id, f.minimized,
 		f.reproduce_status, f.reproduce_enqueued_at, f.reproduce_runs,
 		f.mutation_type, f.mutation_payload,
-		f.severity, f.owasp_category, f.group_id, f.reproducibility
+		f.severity, f.owasp_category, f.group_id, f.reproducibility, f.llm_analysis
 		FROM findings f`
 	if len(q.conditions) > 0 {
 		query += " WHERE "
@@ -413,4 +431,15 @@ func (s *FindingStore) CountByType(ctx context.Context, campaignID string) (map[
 		m[model.FindingType(r.Type)] = r.Count
 	}
 	return m, nil
+}
+
+// UpdateLLMAnalysis persists LLM analysis data for a finding.
+func (s *FindingStore) UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE findings SET llm_analysis = $1 WHERE id = $2`,
+		analysisJSON, id)
+	if err != nil {
+		return fmt.Errorf("update llm analysis: %w", err)
+	}
+	return nil
 }

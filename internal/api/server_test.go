@@ -151,6 +151,10 @@ func (m *mockFindingStore) UpdateFindingGroup(ctx context.Context, id, groupID s
 	return nil
 }
 
+func (m *mockFindingStore) UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error {
+	return nil
+}
+
 type mockArtifactStore struct {
 	getByFindingIDFn func(ctx context.Context, findingID string) (*model.Artifact, error)
 }

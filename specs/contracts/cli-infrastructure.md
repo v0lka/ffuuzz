@@ -26,20 +26,27 @@ artifactStore  := db.NewArtifactStore(database.DB, logger)
 // 4. Corpus Manager
 corpusMgr := corpus.NewManager(recordingStore, campaignStore, logger)
 
-// 5. Engine
-eng := engine.NewEngine(campaignStore, findingStore, artifactStore, corpusMgr, cfg.ArtifactDir, logger)
+// 5. LLM Provider (graceful degradation when disabled)
+llmProvider, err := llm.NewProvider(cfg.LLM, logger)
+var llmTriager *triage.LLMTriager
+if llmProvider != nil {
+    llmTriager = triage.NewLLMTriager(llmProvider, logger)
+}
 
-// 6. Endpoint Resolver
+// 6. Engine
+eng := engine.NewEngine(campaignStore, findingStore, artifactStore, corpusMgr, llmTriager, cfg.ArtifactDir, logger)
+
+// 7. Endpoint Resolver
 resolver := endpoint.NewResolver(recordingStore, logger)
 resolver.RebuildFromDB(context.Background())
 
-// 7. Recorder
+// 8. Recorder
 rec := recorder.NewDBRecorder(recordingStore, resolver, logger)
 
-// 8. Cert Store
+// 9. Cert Store
 cs, err := store.NewCertStore(cfg.CertCache, cfg.TLS, logger)
 
-// 9. MITM Proxy
+// 10. MITM Proxy
 proxy := mitm.New(mitm.Config{
     ListenAddr:    cfg.ProxyAddress,
     CertStore:     cs,
@@ -49,7 +56,7 @@ proxy := mitm.New(mitm.Config{
     Logger:        logger,
 })
 
-// 10. API Server
+// 11. API Server
 apiSrv := api.NewServer(api.ServerConfig{
     Addr:        cfg.APIAddress,
     Recordings:  recordingStore,
@@ -58,12 +65,13 @@ apiSrv := api.NewServer(api.ServerConfig{
     Artifacts:   artifactStore,
     Engine:      eng,
     Health:      database,
+    LLMTriager:  llmTriager,
     ArtifactDir: cfg.ArtifactDir,
     WebFS:       webFS,
     Logger:      logger,
 })
 
-// 11. Vulnerability grouping (background goroutine)
+// 12. Vulnerability grouping (background goroutine)
 go runFindingGroupingLoop(ctx, findingStore, triage.NewTriager(), 15*time.Second, logger)
 ```
 
@@ -75,13 +83,14 @@ The wiring happens in `internal/cli/serve.go:runServe()` in the `serve` subcomma
 2. **Database** — must open before any store is created
 3. **Stores** — depend on `*sqlx.DB`
 4. **Corpus Manager** — depends on `RecordingStore` + `CampaignStore`
-5. **Engine** — depends on all stores + corpus manager
-6. **Endpoint Resolver** — depends on `RecordingStore` (via `Merger` interface implementation)
-7. **Recorder** — depends on `RecordingStore` + `Resolver`
-8. **Cert Store** — depends on `CertCacheConfig` + `TLSConfig`
-9. **MITM Proxy** — depends on `CertStore` + `Recorder`
-10. **API Server** — depends on all stores + `Engine` + WebFS
-11. **Vulnerability Grouping Loop** — depends on `FindingStore`; periodically groups ungrouped confirmed findings (every 15s)
+5. **LLM Provider** — created from config (`FFUUZZ_LLM_*`); graceful degradation when `LLM_ENABLED=false`
+6. **Engine** — depends on all stores + corpus manager + LLM triager
+7. **Endpoint Resolver** — depends on `RecordingStore` (via `Merger` interface implementation)
+8. **Recorder** — depends on `RecordingStore` + `Resolver`
+9. **Cert Store** — depends on `CertCacheConfig` + `TLSConfig`
+10. **MITM Proxy** — depends on `CertStore` + `Recorder`
+11. **API Server** — depends on all stores + `Engine` + `LLMTriager` + WebFS
+12. **Vulnerability Grouping Loop** — depends on `FindingStore`; periodically groups ungrouped confirmed findings (every 15s)
 
 ## Data Flow
 
@@ -97,12 +106,13 @@ db.Open(dsn, logger) ─────────► database
         ┌───────┼─────────┐       │                   │           │
         ▼       ▼         ▼       ▼                   ▼           │
     resolver  corpus   recorder  engine ◄─────────────┘           │
-        │       │         │       │                               │
-        │       │         │       │                               │
-        ▼       │         ▼       │                               │
-      (trie)    │     proxy       │                               │
-                │                 │                               │
-                └─────────────────┴───────────────────────────────┘
+        │       │         │       │    llmProvider                │
+        │       │         │       │    llmTriager                 │
+        │       │         │       │       │                       │
+        ▼       │         ▼       │       │                       │
+      (trie)    │     proxy       │       │                       │
+                │                 │       │                       │
+                └─────────────────┴───────┴───────────────────────┘
                                   │
                                   ▼
                             api.NewServer
