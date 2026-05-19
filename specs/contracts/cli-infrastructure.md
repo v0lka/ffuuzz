@@ -62,6 +62,9 @@ apiSrv := api.NewServer(api.ServerConfig{
     WebFS:       webFS,
     Logger:      logger,
 })
+
+// 11. Vulnerability grouping (background goroutine)
+go runFindingGroupingLoop(ctx, findingStore, triage.NewTriager(), 15*time.Second, logger)
 ```
 
 ## Initialization
@@ -78,6 +81,7 @@ The wiring happens in `internal/cli/serve.go:runServe()` in the `serve` subcomma
 8. **Cert Store** — depends on `CertCacheConfig` + `TLSConfig`
 9. **MITM Proxy** — depends on `CertStore` + `Recorder`
 10. **API Server** — depends on all stores + `Engine` + WebFS
+11. **Vulnerability Grouping Loop** — depends on `FindingStore`; periodically groups ungrouped confirmed findings (every 15s)
 
 ## Data Flow
 
@@ -107,6 +111,8 @@ db.Open(dsn, logger) ─────────► database
                     ▼             ▼             ▼
               ListenAndServe  ListenAndServe  StartReproduceWorker
               (API :8081)     (Proxy :8080)   (background)
+                                              runFindingGroupingLoop
+                                              (periodic, 15s)
 ```
 
 ## Shutdown

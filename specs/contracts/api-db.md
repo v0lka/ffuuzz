@@ -37,6 +37,7 @@ type FindingStore interface {
     GetByID(ctx context.Context, id string) (*model.Finding, error)
     UpdateReproduceStatus(ctx context.Context, id, status string, runs int) error
     CountByType(ctx context.Context, campaignID string) (map[model.FindingType]int, error)
+    UpdateFindingGroup(ctx context.Context, id, groupID string) error
 }
 
 // ArtifactStore — artifact queries
@@ -96,6 +97,10 @@ API Handler
     ├── findingStore.ListAll(ctx, campaignID, typeFilter, statusFilter, since, limit, offset)
     │   └── SQL: SELECT * FROM findings WHERE ... ORDER BY created_at DESC LIMIT $n OFFSET $n
     │   └── Returns []Finding
+    │
+    ├── findingStore.UpdateFindingGroup(ctx, id, groupID)
+    │   └── SQL: UPDATE findings SET group_id=$1 WHERE id=$2
+    │   └── Returns error
     │
     └── health.Ping(ctx)
         └── SQL: SELECT 1

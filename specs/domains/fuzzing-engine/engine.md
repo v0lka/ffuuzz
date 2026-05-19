@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Orchestrates fuzzing campaigns: manages the campaign lifecycle, spawns and manages worker pools with rate limiting, and runs a background reproduce worker for finding validation.
+Orchestrates fuzzing campaigns: manages the campaign lifecycle, spawns and manages worker pools with rate limiting, runs a background reproduce worker for finding validation, and performs vulnerability grouping on confirmed findings at campaign stop.
 
 ## Key Types
 
@@ -42,6 +42,15 @@ type FindingStore interface {
 type ArtifactStore interface {
     Create(ctx context.Context, a model.Artifact) error
     GetByFindingID(ctx context.Context, findingID string) (*model.Artifact, error)
+}
+
+// GroupingStore extends FindingStore with operations for vulnerability grouping.
+// Consumed via type assertion; grouping is silently skipped if not implemented.
+type GroupingStore interface {
+    FindingStore
+    ListAll(ctx context.Context, campaignID, typeFilter, statusFilter string,
+        since *time.Time, limit, offset int) ([]model.Finding, error)
+    UpdateFindingGroup(ctx context.Context, id, groupID string) error
 }
 
 // IntensityTracker maintains per-operator productivity statistics and computes
@@ -134,6 +143,8 @@ Spawns the background reproduce-finding polling goroutine. Called once at applic
 13. close(taskCh) → workers detect closed channel → exit
 14. wg.Wait() → all workers done
 15. UpdateStatus → FINISHED (or STOPPED if ctx cancelled)
+16. Vulnerability grouping (if store implements GroupingStore):
+    └─ List all CONFIRMED findings → GroupFindings() → UpdateFindingGroup() per finding
 ```
 
 ### Worker Loop
@@ -247,6 +258,7 @@ func (w *ReproduceWorker) Run(ctx context.Context)
 - `IntensityTracker` multipliers are capped at 2.5x. No operator ever receives more than a 2.5x boost regardless of productivity.
 - `SeedInterestTracker` scores start at 1.0 (default weight). Seeds always have a non-zero probability of being selected, guaranteeing coverage of all seeds.
 - When only one seed exists, epsilon-greedy degrades to uniform random (no weighted selection possible with a single seed).
+- Vulnerability grouping is run at campaign stop via type assertion on `e.findings.(GroupingStore)`. If the store does not implement `GroupingStore` (e.g., mock stores in tests), grouping is silently skipped. A background goroutine in `cli/serve.go` also groups periodically every 15s.
 
 ## Dependencies
 
@@ -257,7 +269,7 @@ func (w *ReproduceWorker) Run(ctx context.Context)
 | `internal/model` | `Campaign`, `CampaignConfig`, `CampaignStatus`, `Finding`, `Artifact` |
 | `internal/mutate` | `Pipeline`, `SeqMutator`, `Config` |
 | `internal/replayer` | `Replayer`, `ExchangeResult`, `WorkerContext`, `ExtractionRule` |
-| `internal/triage` | `Triager` for dedup, confirm, minimize |
+| `internal/triage` | `Triager` for dedup, confirm, minimize, severity, categorization, grouping |
 | `internal/metrics` | `TestsTotal`, `FindingsTotal` |
 
 ## Edge Cases

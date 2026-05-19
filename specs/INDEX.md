@@ -11,14 +11,14 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 | Add a new anomaly detector | [`domains/anomaly-detection.md`](domains/anomaly-detection.md) |
 | Add a new mutation strategy | [`domains/fuzzing-engine/mutate.md`](domains/fuzzing-engine/mutate.md) |
 | Add a new API endpoint | [`contracts/api-db.md`](contracts/api-db.md), [`contracts/api-engine.md`](contracts/api-engine.md) |
-| Change campaign lifecycle | [`domains/campaign-management.md`](domains/campaign-management.md), [`domains/fuzzing-engine/engine.md`](domains/fuzzing-engine/engine.md) |
+| Change campaign lifecycle, grouping | [`domains/campaign-management.md`](domains/campaign-management.md), [`domains/fuzzing-engine/engine.md`](domains/fuzzing-engine/engine.md) |
 | Modify MITM proxy behaviour | [`domains/traffic-capture/mitm.md`](domains/traffic-capture/mitm.md), [`architecture/security-model.md`](architecture/security-model.md) |
 | Modify recording/storage | [`domains/traffic-capture/recorder.md`](domains/traffic-capture/recorder.md), [`contracts/proxy-recorder.md`](contracts/proxy-recorder.md) |
 | Modify endpoint normalization | [`domains/traffic-capture/endpoint.md`](domains/traffic-capture/endpoint.md) |
-| Modify finding triage | [`domains/triage.md`](domains/triage.md) |
+| Modify finding triage, severity, categorization, grouping | [`domains/triage.md`](domains/triage.md) |
 | Modify HTTP replay logic | [`domains/fuzzing-engine/replayer.md`](domains/fuzzing-engine/replayer.md), [`contracts/engine-replayer.md`](contracts/engine-replayer.md) |
 | Modify TLS/cert management | [`architecture/security-model.md`](architecture/security-model.md) |
-| Change startup wiring | [`contracts/cli-infrastructure.md`](contracts/cli-infrastructure.md) |
+| Change startup wiring, background loops | [`contracts/cli-infrastructure.md`](contracts/cli-infrastructure.md) |
 | Change database schema | [`contracts/api-db.md`](contracts/api-db.md), [`contracts/engine-stores.md`](contracts/engine-stores.md), [`decisions/002-postgresql-persistence.md`](decisions/002-postgresql-persistence.md) |
 | Add a new package/module | [`architecture/layers.md`](architecture/layers.md), [`META.md`](META.md) |
 | Understand a design decision | [`decisions/`](decisions/) directory |
@@ -118,7 +118,7 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 
 **Single-File Domains**
 - [`domains/anomaly-detection.md`](domains/anomaly-detection.md) — Detector interface, 4 detectors, MultiDetector
-- [`domains/triage.md`](domains/triage.md) — Dedup (signatures), confirmation, minimization (delta-debugging)
+- [`domains/triage.md`](domains/triage.md) — Dedup (signatures), confirmation, minimization (delta-debugging), severity scoring, OWASP categorization, vulnerability grouping
 - [`domains/campaign-management.md`](domains/campaign-management.md) — Campaign CRUD, status lifecycle, SSE streaming
 - [`domains/recordings.md`](domains/recordings.md) — Recording import/export, tree, management
 

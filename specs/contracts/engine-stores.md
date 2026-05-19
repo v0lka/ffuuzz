@@ -27,6 +27,15 @@ type FindingStore interface {
     SetReproduceStatus(ctx context.Context, id, status string) error
 }
 
+// GroupingStore — extends FindingStore with grouping operations for vulnerability grouping.
+// Used via type assertion; not required for all FindingStore implementations.
+type GroupingStore interface {
+    FindingStore
+    ListAll(ctx context.Context, campaignID, typeFilter, statusFilter string,
+        since *time.Time, limit, offset int) ([]model.Finding, error)
+    UpdateFindingGroup(ctx context.Context, id, groupID string) error
+}
+
 // ArtifactStore — artifact persistence
 type ArtifactStore interface {
     Create(ctx context.Context, a model.Artifact) error
@@ -46,12 +55,13 @@ type ArtifactStore interface {
 | Dedup findings | `ExistsBySignature` | — |
 | Create finding | `Create` | — |
 | Update finding status | `UpdateStatus` | — |
-| List findings | — | `ListAll` |
+| List findings | `ListAll` (GroupingStore) | `ListAll` |
 | Get finding | `GetByID` | `GetByID` |
 | Reproduce jobs | `ClaimNextReproduceJob`, `SetReproduceStatus` | `UpdateReproduceStatus` |
 | Count by type | — | `CountByType` |
+| Group findings | `UpdateFindingGroup` (GroupingStore) | `UpdateFindingGroup` |
 
-The engine has a narrower interface focused on write-heavy campaign execution. It does not need list operations — those are API-only concerns.
+The engine has a narrower interface focused on write-heavy campaign execution, but the `GroupingStore` extension adds `ListAll` for vulnerability grouping at campaign stop.
 
 ## Implementations
 
@@ -59,6 +69,7 @@ The engine has a narrower interface focused on write-heavy campaign execution. I
 |-----------|---------------|---------|
 | `engine.CampaignStore` | `db.CampaignStore` | `internal/db` |
 | `engine.FindingStore` | `db.FindingStore` | `internal/db` |
+| `engine.GroupingStore` | `db.FindingStore` | `internal/db` |
 | `engine.ArtifactStore` | `db.ArtifactStore` | `internal/db` |
 
 ## Initialization
@@ -109,6 +120,26 @@ ReproduceWorker:
     │
     └── findings.SetReproduceStatus(ctx, id, status)
         └── SQL: UPDATE findings SET reproduce_status=$1
+
+Campaign stop (grouping):
+    │
+    ├── findings.ListAll(ctx, campaignID, "", "CONFIRMED", nil, 10000, 0)
+    │   └── SQL: SELECT * FROM findings WHERE campaign_id=$1 AND status=$2
+    │   └── Returns []Finding (all confirmed findings)
+    │
+    └── findings.UpdateFindingGroup(ctx, findingID, groupID)
+        └── SQL: UPDATE findings SET group_id=$1 WHERE id=$2
+        └── Returns error
+
+Periodic grouping (15s loop):
+    │
+    ├── findings.ListAll(ctx, "", "", "CONFIRMED", nil, 10000, 0)
+    │   └── SQL: SELECT * FROM findings WHERE status='CONFIRMED'
+    │   └── Returns []Finding (filtered for group_id IS NULL)
+    │
+    └── findings.UpdateFindingGroup(ctx, findingID, groupID)
+        └── SQL: UPDATE findings SET group_id=$1 WHERE id=$2
+        └── Returns error
 ```
 
 ## Invariants
@@ -117,6 +148,7 @@ ReproduceWorker:
 - `ExistsBySignature` is called before `Create`. The engine relies on this for dedup, not on DB unique constraints (though the DB likely also has a unique index on signature).
 - `ClaimNextReproduceJob` is atomic with `FOR UPDATE SKIP LOCKED`. Multiple reproduce workers (if ever added) cannot claim the same job.
 - `IncrementStats` is a single atomic UPDATE. No read-modify-write race.
+- `GroupingStore` is consumed via type assertion (`e.findings.(GroupingStore)`). If the store does not implement it, grouping is silently skipped. Mock stores in tests typically do not implement `GroupingStore`.
 
 ## Breaking Change Checklist
 

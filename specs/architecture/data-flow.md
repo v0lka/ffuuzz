@@ -140,15 +140,22 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
   │    ─ exists = findings.ExistsBySignature(sig)      │
   │    ─ if exists: skip (dedup)                      │
   │    ─ if !exists:                                  │
-  │      · triager.Confirm(hit, replayer, N runs)     │
+  │      · severity = ScoreSeverity(type,...,rep=0)   │
+  │      · category = CategorizeFinding(type,...)     │
+  │      · create Finding{Severity, OWASPCategory}    │
+  │      · confirmed, rep, err = triager.Confirm(N)   │
+  │      · reproducibility = rep / runs               │
+  │      · severity = ScoreSeverity(rep=reproduc.)    │
   │      · triager.MinimizeSession(hit, replayer)     │
-  │      · triager.MinimizeJSONBody(hit, replayer)    │
+  │      · ct = GetContentType(ex)                    │
+  │      · route minimizer: JSON/params/XML/multipart │
   └──────────────────┬───────────────────────────────┘
                      ▼
   ┌──────────────────────────────────────────────────┐
   │ 5. PERSIST                  internal/db          │
   │    ─ findings.Create(Finding)                     │
   │    ─ if confirmed: findings.UpdateStatus(id, CONFIRMED)│
+  │    ─ update finding severity + reproducibility    │
   │    ─ artifacts.Create(Artifact) ← JSON payload    │
   │    ─ campaigns.IncrementStats(1, findingDelta)    │
   │    ─ metrics.FindingsTotal.Inc()                  │
@@ -172,14 +179,15 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
 
 1. **Campaign Start** (`internal/engine/engine.go:StartCampaign`) transitions campaign status CREATED → STARTING, loads recording seeds via `corpus.Manager`, computes P50 latency baselines per endpoint, transitions to RUNNING, and spawns a goroutine for the campaign.
 2. **Task Generator** generates `SeedTask` values (random seed session + random mutation seed) and pushes them to a buffered channel. It obeys `max_tests`, `duration_sec`, context cancellation, and rate limiting.
-3. **Worker Pool** (N workers, default 8) consumes tasks from the channel. Each worker:
+3. **Worker Pool** (N workers, default 4) consumes tasks from the channel. Each worker:
    - **Mutates** the seed exchange via `mutate.Pipeline.Mutate()`.
    - **Replays** the mutated exchange against the target via `replayer.Replayer.ReplayExchange()`.
    - **Detects** anomalies via `anomaly.MultiDetector.Detect()`.
-   - **Triages** findings: deduplicates by signature, confirms by re-sending the mutated request N times, minimizes the session and JSON body.
+   - **Triages** findings: deduplicates by signature, assigns severity and OWASP category, confirms by re-sending N times, re-scores severity with actual reproducibility, minimizes the session and body (JSON/query-params/XML/multipart).
    - **Persists** findings and artifacts to PostgreSQL.
 4. **SSE Streaming** (`internal/api/` streams campaign stats (tests done, findings per type, last activity) to connected clients.
 5. **Reproduce Worker** (`internal/engine/reproduce.go`) polls for enqueued reproduce jobs and replays the finding's artifact session against the target.
+6. **Vulnerability Grouping** — At campaign stop, confirmed findings are grouped by type/mutation/endpoint/status-range and assigned a shared `GroupID`. A background goroutine also groups periodically every 15s.
 
 ### Shutdown Phase
 
@@ -197,7 +205,8 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
 - Rate limiting uses a token-bucket algorithm. Workers block on `limiter.Acquire(ctx)` before each mutation.
 - Anomaly detection results are processed per-exchange, not batched. Each mutated exchange triggers a full detect→triage→persist cycle.
 - The reproduce worker is started once at application startup (`Engine.StartReproduceWorker`) and runs for the lifetime of the process.
-- Shutdown order is strict: API → Engine (campaigns) → Proxy → DB. This order is enforced in `internal/cli/serve.go`.
+- A finding grouping goroutine runs every 15s in the background, scanning for ungrouped confirmed findings and assigning group IDs. It is started alongside the reproduce worker.
+- Shutdown order is strict: API → Engine (campaigns) → Proxy → DB. The grouping goroutine stops when the shared context is cancelled.
 
 ## Anti-patterns
 
