@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // TLSConfig configures TLS behavior for the MITM proxy and certificate store.
@@ -89,7 +91,12 @@ func DefaultConfig() *Config {
 func Load(args []string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	// Environment variables
+	// Load .env file if present. Does not override already-set environment
+	// variables (real env takes precedence over .env). Supports ${VAR} and
+	// $VAR expansion for referencing other variables within the file.
+	_ = godotenv.Load()
+
+	// Environment variables (from real env or loaded .env)
 	if v := os.Getenv("FFUUZZ_API_ADDRESS"); v != "" {
 		cfg.APIAddress = v
 	}
@@ -130,12 +137,60 @@ func Load(args []string) (*Config, error) {
 			cfg.RPS = n
 		}
 	}
+	if v := os.Getenv("FFUUZZ_MAX_BODY_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_MAX_BODY_BYTES=%q: %v\n", v, err)
+		} else if n > 0 {
+			cfg.MaxBodyBytes = n
+		}
+	}
 	if v := os.Getenv("FFUUZZ_TLS_SKIP_VERIFY"); v != "" {
 		if b, err := strconv.ParseBool(v); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_TLS_SKIP_VERIFY=%q: %v\n", v, err)
 		} else {
 			cfg.TLSSkipVerify = b
 		}
+	}
+	if v := os.Getenv("FFUUZZ_TLS_MIN_VERSION"); v != "" {
+		switch v {
+		case "1.2":
+			cfg.TLS.MinVersion = tls.VersionTLS12
+		case "1.3":
+			cfg.TLS.MinVersion = tls.VersionTLS13
+		default:
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_TLS_MIN_VERSION=%q (expected 1.2 or 1.3)\n", v)
+		}
+	}
+	if v := os.Getenv("FFUUZZ_TLS_HANDSHAKE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_TLS_HANDSHAKE_TIMEOUT=%q: %v\n", v, err)
+		} else {
+			cfg.TLS.HandshakeTimeout = d
+		}
+	}
+	if v := os.Getenv("FFUUZZ_TLS_DISABLE_SESSION_TICKETS"); v != "" {
+		if b, err := strconv.ParseBool(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_TLS_DISABLE_SESSION_TICKETS=%q: %v\n", v, err)
+		} else {
+			cfg.TLS.DisableSessionTickets = b
+		}
+	}
+	if v := os.Getenv("FFUUZZ_CERT_CACHE_MAX_ENTRIES"); v != "" {
+		if n, err := strconv.Atoi(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_CERT_CACHE_MAX_ENTRIES=%q: %v\n", v, err)
+		} else if n > 0 {
+			cfg.CertCache.MaxEntries = n
+		}
+	}
+	if v := os.Getenv("FFUUZZ_CERT_MEMORY_ONLY"); v != "" {
+		if b, err := strconv.ParseBool(v); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: invalid FFUUZZ_CERT_MEMORY_ONLY=%q: %v\n", v, err)
+		} else {
+			cfg.CertCache.MemoryOnly = b
+		}
+	}
+	if v := os.Getenv("FFUUZZ_CERT_CACHE_DIR"); v != "" {
+		cfg.CertCache.CertDir = v
 	}
 
 	// LLM configuration
