@@ -50,6 +50,16 @@ specs/
     ├── 002-postgresql-persistence.md
     ├── 003-mitm-tls-interception.md
     └── 004-mutation-fuzzing-approach.md
+│
+├── infrastructure/                  ← infrastructure component specs
+│   ├── config.md
+│   ├── llm-providers.md
+│   └── metrics.md
+│
+└── utility/                         ← utility package specs
+    ├── httputil.md
+    ├── diff.md
+    └── report.md
 ```
 
 ## Layer Architecture

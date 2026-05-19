@@ -97,8 +97,8 @@ type WorkerConfig struct {
 
 ## Public API
 
-### `NewEngine(campaigns, findings, artifacts, corpus, artifactDir, logger) *Engine`
-Creates the engine with all required store dependencies and the corpus manager.
+### `NewEngine(campaigns, findings, artifacts, corpus, llmTriager, artifactDir, logger) *Engine`
+Creates the engine with all required store dependencies, corpus manager, and optional LLM triager (nil if LLM is disabled).
 
 ### `StartCampaign(ctx context.Context, campaign *model.Campaign) error`
 Starts a fuzzing campaign. Transitions CREATED → STARTING → RUNNING. Loads seeds and computes baselines synchronously, then spawns a goroutine (`runCampaign`) for the fuzz loop. Returns an error if seed loading fails, no seeds exist, or status transitions fail.

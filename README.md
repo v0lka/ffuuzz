@@ -1,4 +1,5 @@
 # FFUUZZ
+
 [![Tests](https://github.com/v0lka/ffuuzz/actions/workflows/tests.yml/badge.svg)](https://github.com/v0lka/ffuuzz/actions/workflows/tests.yml)
 ![Coverage](https://img.shields.io/badge/Coverage-68.9%25-yellow)
 
@@ -17,7 +18,7 @@ FFUZZ is a web application security testing tool that combines MITM proxy traffi
 ### Installation
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:v0lka/ffuuzz.git
 cd ffuuzz
 
 # Configure your environment (copy and edit .env.example)

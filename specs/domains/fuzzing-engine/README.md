@@ -12,7 +12,7 @@ The fuzzing engine orchestrates the core "fuzz" phase: loading recording seeds, 
 | `internal/engine/worker.go` | `Worker` struct, fuzz loop (mutate → replay → detect → triage → persist), intensity/feedback tracking |
 | `internal/engine/intensity.go` | `IntensityTracker`: per-operator productivity statistics, adaptive intensity multipliers |
 | `internal/engine/feedback.go` | `SeedInterestTracker`: coverage-guided seed scoring, weighted selection weights |
-| `internal/engine/limiter.go` | `Limiter`: token-bucket rate limiting |
+| `internal/engine/ratelimit.go` | `Limiter`: token-bucket rate limiting |
 | `internal/engine/reproduce.go` | `ReproduceWorker`: background finding reproduction |
 | `internal/mutate/mutate.go` | `Pipeline`: mutation pipeline orchestrator |
 | `internal/mutate/dictionary.go` | `Dictionary`: user-supplied header values with per-endpoint support, traffic extraction |

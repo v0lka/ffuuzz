@@ -138,7 +138,13 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 - [`decisions/002-postgresql-persistence.md`](decisions/002-postgresql-persistence.md) — PostgreSQL with sqlx and JSONB
 - [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
 - [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline
-- [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
-- [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline
-- [`decisions/003-mitm-tls-interception.md`](decisions/003-mitm-tls-interception.md) — On-the-fly TLS certificate generation
-- [`decisions/004-mutation-fuzzing-approach.md`](decisions/004-mutation-fuzzing-approach.md) — Mutation-based fuzzing pipeline
+
+### Infrastructure
+- [`infrastructure/config.md`](infrastructure/config.md) — Application configuration: 22 env vars, 13 CLI flags, loading priority chain, `DefaultConfig()`
+- [`infrastructure/llm-providers.md`](infrastructure/llm-providers.md) — LLM provider implementations: OpenAI (structured JSON output) and Anthropic (regex JSON extraction)
+- [`infrastructure/metrics.md`](infrastructure/metrics.md) — Prometheus metrics: 11 metrics in a custom registry (non-global)
+
+### Utility
+- [`utility/httputil.md`](utility/httputil.md) — HTTP helpers: hop-by-hop headers, LimitedBuffer, TeeReadCloser, request IDs, server construction
+- [`utility/diff.md`](utility/diff.md) — Structural diff between two TxRecords (URL + status comparison)
+- [`utility/report.md`](utility/report.md) — Aggregate summary: method/status/host breakdowns from recorded transactions
