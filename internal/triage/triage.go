@@ -2,12 +2,18 @@
 package triage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -143,7 +149,7 @@ func (t *Triager) stillTriggers(
 }
 
 // Confirm replays a finding N times to check if the anomaly is reproducible.
-// Returns true if the anomaly reproduced in at least half the runs.
+// Returns whether the anomaly was confirmed, the number of successful reproductions, and any error.
 func (t *Triager) Confirm(
 	ctx context.Context,
 	session model.RecordingSession,
@@ -155,7 +161,7 @@ func (t *Triager) Confirm(
 	runs int,
 	timeout time.Duration,
 	logger zerolog.Logger,
-) (bool, error) {
+) (bool, int, error) {
 	if runs <= 0 {
 		runs = 3
 	}
@@ -164,7 +170,7 @@ func (t *Triager) Confirm(
 	for i := 0; i < runs; i++ {
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return false, reproduced, ctx.Err()
 		default:
 		}
 
@@ -173,7 +179,7 @@ func (t *Triager) Confirm(
 		}
 	}
 
-	return reproduced >= (runs+1)/2, nil
+	return reproduced >= (runs+1)/2, reproduced, nil
 }
 
 // MinimizeSession attempts to reduce the session to the minimal set of exchanges
@@ -452,4 +458,537 @@ func countKeysDeep(m map[string]interface{}) int {
 		}
 	}
 	return count
+}
+
+// ScoreSeverity assigns a severity level (CRITICAL/HIGH/MEDIUM/LOW/INFO) based on
+// endpoint sensitivity, finding type, mutation type, and reproducibility rate.
+func (t *Triager) ScoreSeverity(
+	findingType model.FindingType,
+	endpoint, method, mutationType string,
+	reproducibility float64,
+	responseStatus int,
+) model.Severity {
+	endpointWeight := 0.4 // default
+	switch {
+	case strings.HasPrefix(endpoint, "/auth/"):
+		endpointWeight = 1.0
+	case strings.HasPrefix(endpoint, "/admin/"):
+		endpointWeight = 0.8
+	case strings.HasPrefix(endpoint, "/api/users"):
+		endpointWeight = 0.7
+	case strings.HasPrefix(endpoint, "/api/"):
+		endpointWeight = 0.5
+	case strings.HasPrefix(endpoint, "/health"):
+		endpointWeight = 0.2
+	}
+
+	var typeWeight float64
+	switch findingType {
+	case model.FindingServerError:
+		typeWeight = 0.8
+	case model.FindingRegexMatch:
+		typeWeight = 0.6
+	case model.FindingTimeout:
+		typeWeight = 0.5
+	case model.FindingLatencyRegression:
+		typeWeight = 0.3
+	default:
+		typeWeight = 0.4
+	}
+
+	mutationWeight := 0.4 // default
+	mtl := strings.ToLower(mutationType)
+	if strings.Contains(mtl, "header") {
+		mutationWeight = 0.6
+	} else if strings.Contains(mtl, "uri") || strings.Contains(mtl, "param") || strings.Contains(mtl, "query") {
+		mutationWeight = 0.5
+	} else if strings.Contains(mtl, "seq") {
+		mutationWeight = 0.3
+	}
+	for _, kw := range []string{"sqli", "cmdi", "xxe", "injection", "os_command", "template", "ldap", "xpath", "ssrf"} {
+		if strings.Contains(mtl, kw) {
+			mutationWeight = 1.0
+			break
+		}
+	}
+
+	var reproMult float64
+	switch {
+	case reproducibility <= 0:
+		reproMult = 1.0
+	case reproducibility > 0.8:
+		reproMult = 1.0
+	case reproducibility >= 0.5:
+		reproMult = 0.75
+	default:
+		reproMult = 0.5
+	}
+
+	score := (endpointWeight + typeWeight + mutationWeight) / 3 * reproMult
+
+	switch {
+	case score >= 0.8:
+		return model.SeverityCritical
+	case score >= 0.6:
+		return model.SeverityHigh
+	case score >= 0.4:
+		return model.SeverityMedium
+	case score >= 0.2:
+		return model.SeverityLow
+	default:
+		return model.SeverityInfo
+	}
+}
+
+// stackTracePatterns matches common error disclosure patterns in response bodies.
+var stackTracePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`at com\.\w+\.`),
+	regexp.MustCompile(`NullPointerException`),
+	regexp.MustCompile(`Traceback \(most recent call last\)`),
+	regexp.MustCompile(`PHP Fatal error`),
+	regexp.MustCompile(`SQLSTATE`),
+	regexp.MustCompile(`PostgreSQL query failed`),
+	regexp.MustCompile(`Microsoft OLE DB`),
+}
+
+// CategorizeFinding maps a finding to an OWASP Top 10 2025 category based on
+// mutation type, response body content, and finding type.
+func (t *Triager) CategorizeFinding(
+	findingType model.FindingType,
+	mutationType string,
+	responseBody []byte,
+	httpStatus int,
+) model.OWASPCategory {
+	mtl := strings.ToLower(mutationType)
+
+	// A05: Injection — sqli, cmdi, xxe, ssrf, template/ldap/xpath injection
+	for _, kw := range []string{"sqli", "cmdi", "xxe", "ssrf", "template_injection", "ldap_injection", "xpath_injection"} {
+		if strings.Contains(mtl, kw) {
+			return model.OWASPCatA05Injection
+		}
+	}
+
+	// A04: Cryptographic Failures — jwt mutation causing 500
+	if strings.Contains(mtl, "jwt") && httpStatus >= 500 {
+		return model.OWASPCatA04CryptographicFailures
+	}
+
+	// A07: Authentication Failures — jwt or cookie mutations (non-500)
+	if strings.Contains(mtl, "jwt") || strings.Contains(mtl, "cookie") {
+		return model.OWASPCatA07AuthenticationFailures
+	}
+
+	// A02: Security Misconfiguration — cors/origin header mutations
+	if strings.Contains(mtl, "cors") || strings.Contains(mtl, "origin") {
+		return model.OWASPCatA02SecurityMisconfiguration
+	}
+
+	// A10: Exceptional Conditions — stack traces / error disclosure in body
+	bodyStr := string(responseBody)
+	for _, re := range stackTracePatterns {
+		if re.MatchString(bodyStr) {
+			return model.OWASPCatA10ExceptionalConditions
+		}
+	}
+
+	// A06: Insecure Design — SERVER_ERROR with no specific match
+	if findingType == model.FindingServerError {
+		return model.OWASPCatA06InsecureDesign
+	}
+
+	return model.OWASPCatUncategorized
+}
+
+// GroupFindings groups findings by (Type, MutationPrefix, EndpointPattern, HTTPStatusRange).
+// Returns a map from group key to the slice of findings that belong to that group.
+func (t *Triager) GroupFindings(findings []model.Finding) map[string][]model.Finding {
+	groups := make(map[string][]model.Finding)
+	for _, f := range findings {
+		key := groupKey(f)
+		groups[key] = append(groups[key], f)
+	}
+	return groups
+}
+
+// groupKey builds a grouping key for a finding.
+func groupKey(f model.Finding) string {
+	// Mutation prefix: first colon-delimited segment, or "unknown"
+	mutPrefix := "unknown"
+	if f.MutationType != "" {
+		if idx := strings.IndexByte(f.MutationType, ':'); idx >= 0 {
+			mutPrefix = f.MutationType[:idx]
+		} else {
+			mutPrefix = f.MutationType
+		}
+	}
+
+	// Endpoint pattern: first path segment, or "root"
+	endpointPattern := "root"
+	if f.Endpoint != "" && f.Endpoint != "/" {
+		segments := strings.Split(strings.TrimPrefix(f.Endpoint, "/"), "/")
+		if len(segments) > 0 && segments[0] != "" {
+			endpointPattern = segments[0]
+		}
+	}
+
+	// HTTP status range
+	statusRange := "0xx"
+	status := f.Details.HTTPStatus
+	switch {
+	case status >= 500:
+		statusRange = "5xx"
+	case status >= 400:
+		statusRange = "4xx"
+	case status >= 300:
+		statusRange = "3xx"
+	case status >= 200:
+		statusRange = "2xx"
+	}
+
+	return string(f.Type) + "|" + mutPrefix + "|" + endpointPattern + "|" + statusRange
+}
+
+// GetContentType extracts the Content-Type header value (lowercased, without parameters)
+// from a request, or returns an empty string if not present.
+func GetContentType(req model.RequestData) string {
+	for k, vv := range req.Headers {
+		if strings.EqualFold(k, "content-type") && len(vv) > 0 {
+			ct := strings.ToLower(vv[0])
+			if idx := strings.IndexByte(ct, ';'); idx >= 0 {
+				ct = strings.TrimSpace(ct[:idx])
+			}
+			return ct
+		}
+	}
+	return ""
+}
+
+// MinimizeQueryParams attempts to reduce query parameters by binary-search removal
+// while verifying the anomaly still fires. Returns nil, nil if no reduction was possible.
+func (t *Triager) MinimizeQueryParams(
+	ctx context.Context,
+	session model.RecordingSession,
+	exchangeIdx int,
+	baseURL string,
+	detector anomaly.Detector,
+	anomalyCfg model.AnomalyConfig,
+	baseline *anomaly.BaselineEntry,
+	rep SessionReplayer,
+	timeout time.Duration,
+	logger zerolog.Logger,
+) (*model.RecordingSession, error) {
+	if exchangeIdx < 0 || exchangeIdx >= len(session.Entries) {
+		return nil, nil
+	}
+
+	ex := session.Entries[exchangeIdx]
+	if ex.Request.Query == "" {
+		return nil, nil
+	}
+
+	vals, err := url.ParseQuery(ex.Request.Query)
+	if err != nil || len(vals) == 0 {
+		return nil, nil
+	}
+
+	params := make(map[string]interface{}, len(vals))
+	for k := range vals {
+		params[k] = vals.Get(k)
+	}
+
+	verify := func(candidate map[string]interface{}) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		newVals := make(url.Values, len(candidate))
+		for k, v := range candidate {
+			s, ok := v.(string)
+			if !ok {
+				s = fmt.Sprintf("%v", v)
+			}
+			newVals.Set(k, s)
+		}
+		cloned := cloneSessionWithBody(session, exchangeIdx, ex.Request.BodyB64)
+		cloned.Entries[exchangeIdx].Request.Query = newVals.Encode()
+		return t.stillTriggers(ctx, cloned, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger)
+	}
+
+	reduced := t.deltaDebugKeys(ctx, params, sortedKeys(params), verify, 0)
+
+	if len(reduced) >= len(params) {
+		return nil, nil
+	}
+
+	newVals := make(url.Values, len(reduced))
+	for k, v := range reduced {
+		s, ok := v.(string)
+		if !ok {
+			s = fmt.Sprintf("%v", v)
+		}
+		newVals.Set(k, s)
+	}
+
+	result := cloneSessionWithBody(session, exchangeIdx, ex.Request.BodyB64)
+	result.Entries[exchangeIdx].Request.Query = newVals.Encode()
+	return &result, nil
+}
+
+// MinimizeXMLBody attempts to reduce an XML request body by binary-search leaf-element removal
+// while verifying the anomaly still fires. Returns nil, nil if no reduction was possible.
+func (t *Triager) MinimizeXMLBody(
+	ctx context.Context,
+	session model.RecordingSession,
+	exchangeIdx int,
+	baseURL string,
+	detector anomaly.Detector,
+	anomalyCfg model.AnomalyConfig,
+	baseline *anomaly.BaselineEntry,
+	rep SessionReplayer,
+	timeout time.Duration,
+	logger zerolog.Logger,
+) (*model.RecordingSession, error) {
+	if exchangeIdx < 0 || exchangeIdx >= len(session.Entries) {
+		return nil, nil
+	}
+
+	ex := session.Entries[exchangeIdx]
+	if ex.Request.BodyB64 == "" || ex.Request.BodyTruncated {
+		return nil, nil
+	}
+
+	ct := GetContentType(ex.Request)
+	if ct != "" && !strings.Contains(ct, "xml") {
+		return nil, nil
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(ex.Request.BodyB64)
+	if err != nil || len(raw) == 0 {
+		return nil, nil
+	}
+
+	xmlMap, err := parseXMLToMap(raw)
+	if err != nil || len(xmlMap) == 0 {
+		return nil, nil
+	}
+
+	verify := func(candidate map[string]interface{}) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		data, err := mapToXMLBytes(candidate)
+		if err != nil || data == nil {
+			return false
+		}
+		b64 := base64.StdEncoding.EncodeToString(data)
+		testSession := cloneSessionWithBody(session, exchangeIdx, b64)
+		return t.stillTriggers(ctx, testSession, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger)
+	}
+
+	reduced := t.deltaDebugKeys(ctx, xmlMap, sortedKeys(xmlMap), verify, 0)
+
+	if len(reduced) >= len(xmlMap) {
+		return nil, nil
+	}
+
+	data, err := mapToXMLBytes(reduced)
+	if err != nil || data == nil {
+		return nil, nil
+	}
+	result := cloneSessionWithBody(session, exchangeIdx, base64.StdEncoding.EncodeToString(data))
+	return &result, nil
+}
+
+// parseXMLToMap uses XML tokenization to flatten an XML document into a path→value map.
+func parseXMLToMap(data []byte) (map[string]interface{}, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	result := make(map[string]interface{})
+	var path []string
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			path = append(path, t.Name.Local)
+		case xml.EndElement:
+			if len(path) > 0 {
+				path = path[:len(path)-1]
+			}
+		case xml.CharData:
+			text := strings.TrimSpace(string(t))
+			if text != "" && len(path) > 0 {
+				key := strings.Join(path, ".")
+				result[key] = text
+			}
+		}
+	}
+	return result, nil
+}
+
+// mapToXMLBytes rebuilds XML from a flat path→value map.
+func mapToXMLBytes(m map[string]interface{}) ([]byte, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var buf bytes.Buffer
+	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+
+	for _, k := range keys {
+		v, ok := m[k].(string)
+		if !ok {
+			v = fmt.Sprintf("%v", m[k])
+		}
+		parts := strings.Split(k, ".")
+		for _, part := range parts {
+			buf.WriteString("<" + part + ">")
+		}
+		buf.WriteString(xmlEscapeText(v))
+		for i := len(parts) - 1; i >= 0; i-- {
+			buf.WriteString("</" + parts[i] + ">")
+		}
+	}
+
+	return buf.Bytes(), nil
+}
+
+// xmlEscapeText escapes special XML characters in text content.
+func xmlEscapeText(s string) string {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		return s
+	}
+	return buf.String()
+}
+
+// multipartPart represents a single part in a multipart form body.
+type multipartPart struct {
+	name string
+	body []byte
+}
+
+// MinimizeMultipartBody attempts to reduce a multipart form-data body by removing parts
+// one at a time while verifying the anomaly still fires. Returns nil, nil if no reduction was possible.
+func (t *Triager) MinimizeMultipartBody(
+	ctx context.Context,
+	session model.RecordingSession,
+	exchangeIdx int,
+	baseURL string,
+	detector anomaly.Detector,
+	anomalyCfg model.AnomalyConfig,
+	baseline *anomaly.BaselineEntry,
+	rep SessionReplayer,
+	timeout time.Duration,
+	logger zerolog.Logger,
+) (*model.RecordingSession, error) {
+	if exchangeIdx < 0 || exchangeIdx >= len(session.Entries) {
+		return nil, nil
+	}
+
+	ex := session.Entries[exchangeIdx]
+	if ex.Request.BodyB64 == "" || ex.Request.BodyTruncated {
+		return nil, nil
+	}
+
+	ct := GetContentType(ex.Request)
+	if !strings.Contains(ct, "multipart/form-data") {
+		return nil, nil
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(ex.Request.BodyB64)
+	if err != nil || len(raw) == 0 {
+		return nil, nil
+	}
+
+	_, params, err := mime.ParseMediaType(ex.Request.Headers["Content-Type"][0])
+	if err != nil {
+		return nil, nil
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		return nil, nil
+	}
+
+	var parts []multipartPart
+	mr := multipart.NewReader(bytes.NewReader(raw), boundary)
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, nil
+		}
+		body, _ := io.ReadAll(p)
+		parts = append(parts, multipartPart{
+			name: p.FormName(),
+			body: body,
+		})
+	}
+
+	if len(parts) <= 1 {
+		return nil, nil
+	}
+
+	changed := false
+	for i := len(parts) - 1; i >= 0; i-- {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		candidateParts := make([]multipartPart, 0, len(parts)-1)
+		for j, p := range parts {
+			if j != i {
+				candidateParts = append(candidateParts, p)
+			}
+		}
+
+		newBody := buildMultipartBody(candidateParts, boundary)
+		b64 := base64.StdEncoding.EncodeToString(newBody)
+		testSession := cloneSessionWithBody(session, exchangeIdx, b64)
+
+		if t.stillTriggers(ctx, testSession, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) {
+			parts = candidateParts
+			changed = true
+		}
+	}
+
+	if !changed {
+		return nil, nil
+	}
+
+	newBody := buildMultipartBody(parts, boundary)
+	result := cloneSessionWithBody(session, exchangeIdx, base64.StdEncoding.EncodeToString(newBody))
+	return &result, nil
+}
+
+// buildMultipartBody constructs a multipart/form-data body from parts.
+func buildMultipartBody(parts []multipartPart, boundary string) []byte {
+	var buf bytes.Buffer
+	for _, p := range parts {
+		buf.WriteString("--" + boundary + "\r\n")
+		buf.WriteString("Content-Disposition: form-data; name=\"" + p.name + "\"\r\n")
+		buf.WriteString("\r\n")
+		buf.Write(p.body)
+		buf.WriteString("\r\n")
+	}
+	buf.WriteString("--" + boundary + "--\r\n")
+	return buf.Bytes()
 }

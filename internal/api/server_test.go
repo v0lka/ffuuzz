@@ -147,6 +147,9 @@ func (m *mockFindingStore) CountByType(ctx context.Context, campaignID string) (
 	}
 	return nil, nil
 }
+func (m *mockFindingStore) UpdateFindingGroup(ctx context.Context, id, groupID string) error {
+	return nil
+}
 
 type mockArtifactStore struct {
 	getByFindingIDFn func(ctx context.Context, findingID string) (*model.Artifact, error)

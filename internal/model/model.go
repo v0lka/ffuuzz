@@ -200,6 +200,10 @@ type Finding struct {
 	ReproduceRuns       int            `json:"reproduce_runs,omitempty" db:"reproduce_runs"`
 	MutationType        string         `json:"mutation_type,omitempty" db:"mutation_type"`
 	MutationPayload     string         `json:"mutation_payload,omitempty" db:"mutation_payload"`
+	Severity            Severity       `json:"severity" db:"severity"`
+	OWASPCategory       OWASPCategory  `json:"owasp_category" db:"owasp_category"`
+	GroupID             *string        `json:"group_id,omitempty" db:"group_id"`
+	Reproducibility     float64        `json:"reproducibility" db:"reproducibility"`
 
 	// DB-only JSONB
 	DetailsJSON []byte `json:"-" db:"details"`
@@ -213,6 +217,34 @@ type Artifact struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	SizeBytes int64     `json:"size_bytes" db:"size_bytes"`
 }
+
+// Severity represents the assessed severity of a finding.
+type Severity string
+
+const (
+	SeverityCritical Severity = "CRITICAL"
+	SeverityHigh     Severity = "HIGH"
+	SeverityMedium   Severity = "MEDIUM"
+	SeverityLow      Severity = "LOW"
+	SeverityInfo     Severity = "INFO"
+)
+
+// OWASPCategory maps a finding to an OWASP Top 10 2025 category.
+type OWASPCategory string
+
+const (
+	OWASPCatA01BrokenAccessControl       OWASPCategory = "A01_BROKEN_ACCESS_CONTROL"
+	OWASPCatA02SecurityMisconfiguration  OWASPCategory = "A02_SECURITY_MISCONFIGURATION"
+	OWASPCatA03SoftwareSupplyChain       OWASPCategory = "A03_SOFTWARE_SUPPLY_CHAIN"
+	OWASPCatA04CryptographicFailures     OWASPCategory = "A04_CRYPTOGRAPHIC_FAILURES"
+	OWASPCatA05Injection                 OWASPCategory = "A05_INJECTION"
+	OWASPCatA06InsecureDesign            OWASPCategory = "A06_INSECURE_DESIGN"
+	OWASPCatA07AuthenticationFailures    OWASPCategory = "A07_AUTHENTICATION_FAILURES"
+	OWASPCatA08SoftwareDataIntegrity     OWASPCategory = "A08_SOFTWARE_DATA_INTEGRITY"
+	OWASPCatA09SecurityLoggingAlerting   OWASPCategory = "A09_SECURITY_LOGGING_ALERTING"
+	OWASPCatA10ExceptionalConditions     OWASPCategory = "A10_EXCEPTIONAL_CONDITIONS"
+	OWASPCatUncategorized                OWASPCategory = "UNCATEGORIZED"
+)
 
 // ArtifactPayload is the JSON structure written to artifact files.
 type ArtifactPayload struct {

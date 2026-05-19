@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"ffuuzz/internal/anomaly"
@@ -33,6 +34,13 @@ type FindingStore interface {
 	GetByID(ctx context.Context, id string) (*model.Finding, error)
 	ClaimNextReproduceJob(ctx context.Context) (string, int, bool, error)
 	SetReproduceStatus(ctx context.Context, id, status string) error
+}
+
+// GroupingStore extends FindingStore with grouping operations for vulnerability grouping.
+type GroupingStore interface {
+	FindingStore
+	ListAll(ctx context.Context, campaignID, typeFilter, statusFilter string, since *time.Time, limit, offset int) ([]model.Finding, error)
+	UpdateFindingGroup(ctx context.Context, id, groupID string) error
 }
 
 // ArtifactStore defines the artifact operations needed by the engine.
@@ -342,6 +350,25 @@ func (e *Engine) runCampaign(
 	}
 
 	logger.Info().Str("final_status", string(finalStatus)).Msg("campaign ended")
+
+	// Run vulnerability grouping on all confirmed findings
+	if gs, ok := e.findings.(GroupingStore); ok {
+		findings, err := gs.ListAll(context.Background(), campaignID, "", string(model.FindingConfirmed), nil, 10000, 0)
+		if err != nil {
+			logger.Warn().Err(err).Msg("grouping: list findings failed")
+		} else if len(findings) > 0 {
+			groups := triager.GroupFindings(findings)
+			for _, groupFindings := range groups {
+				groupID := uuid.New().String()
+				for _, f := range groupFindings {
+					if err := gs.UpdateFindingGroup(context.Background(), f.ID, groupID); err != nil {
+						logger.Warn().Err(err).Str("finding_id", f.ID).Msg("grouping: update failed")
+					}
+				}
+			}
+			logger.Info().Int("groups", len(groups)).Int("findings", len(findings)).Msg("grouping complete")
+		}
+	}
 }
 
 // StopCampaign cancels a running campaign.

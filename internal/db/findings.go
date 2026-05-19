@@ -45,6 +45,10 @@ type findingRow struct {
 	ReproduceRuns       int            `db:"reproduce_runs"`
 	MutationType        sql.NullString `db:"mutation_type"`
 	MutationPayload     sql.NullString `db:"mutation_payload"`
+	Severity            string         `db:"severity"`
+	OWASPCategory       string         `db:"owasp_category"`
+	GroupID             sql.NullString `db:"group_id"`
+	Reproducibility     float64        `db:"reproducibility"`
 }
 
 func (r findingRow) toModel(logger zerolog.Logger) model.Finding {
@@ -79,6 +83,12 @@ func (r findingRow) toModel(logger zerolog.Logger) model.Finding {
 	if r.MutationPayload.Valid {
 		f.MutationPayload = r.MutationPayload.String
 	}
+	f.Severity = model.Severity(r.Severity)
+	f.OWASPCategory = model.OWASPCategory(r.OWASPCategory)
+	if r.GroupID.Valid {
+		f.GroupID = &r.GroupID.String
+	}
+	f.Reproducibility = r.Reproducibility
 	if len(r.Details) > 0 {
 		if err := json.Unmarshal(r.Details, &f.Details); err != nil {
 			logger.Warn().Err(err).Str("finding_id", r.ID).Msg("unmarshal finding details failed")
@@ -108,10 +118,11 @@ func (s *FindingStore) Create(ctx context.Context, f model.Finding) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload, severity, owasp_category, reproducibility)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		f.ID, f.CampaignID, string(f.Type), string(f.Status), f.Signature,
 		f.CreatedAt, f.Method, f.Endpoint, detailsJSON, seedRec, f.Minimized, mutationType, mutationPayload,
+		string(f.Severity), string(f.OWASPCategory), f.Reproducibility,
 	)
 	if err != nil {
 		return fmt.Errorf("insert finding: %w", err)
@@ -162,7 +173,8 @@ func (s *FindingStore) GetByID(ctx context.Context, id string) (*model.Finding, 
 		`SELECT id, campaign_id, type, status, signature, created_at, confirmed_at,
 			method, endpoint, details, seed_recording_id, minimized,
 			reproduce_status, reproduce_enqueued_at, reproduce_runs,
-			mutation_type, mutation_payload
+			mutation_type, mutation_payload,
+			severity, owasp_category, group_id, reproducibility
 		 FROM findings WHERE id = $1`, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -223,7 +235,8 @@ func (q *findingsQuery) build(limit, offset int) (string, []any) {
 	query := `SELECT f.id, f.campaign_id, f.type, f.status, f.signature, f.created_at, f.confirmed_at,
 		f.method, f.endpoint, f.details, f.seed_recording_id, f.minimized,
 		f.reproduce_status, f.reproduce_enqueued_at, f.reproduce_runs,
-		f.mutation_type, f.mutation_payload
+		f.mutation_type, f.mutation_payload,
+		f.severity, f.owasp_category, f.group_id, f.reproducibility
 		FROM findings f`
 	if len(q.conditions) > 0 {
 		query += " WHERE "
@@ -347,6 +360,17 @@ func (s *FindingStore) UpdateStatus(ctx context.Context, id string, status model
 		`UPDATE findings SET status = $1 WHERE id = $2`, string(status), id)
 	if err != nil {
 		return fmt.Errorf("update finding status: %w", err)
+	}
+	return nil
+}
+
+// UpdateFindingGroup assigns a group ID to a finding.
+func (s *FindingStore) UpdateFindingGroup(ctx context.Context, findingID, groupID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE findings SET group_id = $1 WHERE id = $2`,
+		groupID, findingID)
+	if err != nil {
+		return fmt.Errorf("update finding group: %w", err)
 	}
 	return nil
 }

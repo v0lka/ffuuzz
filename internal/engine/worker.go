@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -300,6 +301,13 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 		Details:         hit.Details,
 		MutationType:    mutationType,
 		MutationPayload: mutationPayload,
+		Severity: w.triager.ScoreSeverity(
+			hit.Type, hit.Endpoint, hit.Method,
+			mutationType, 0.0, hit.Details.HTTPStatus,
+		),
+		OWASPCategory: w.triager.CategorizeFinding(
+			hit.Type, mutationType, hit.ResultBody, hit.Details.HTTPStatus,
+		),
 	}
 
 	if err := w.findings.Create(ctx, finding); err != nil {
@@ -328,7 +336,7 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 	// Triage: confirmation
 	if w.triageCfg.ConfirmRuns > 0 {
 		timeout := time.Duration(w.reqTimeoutMs) * time.Millisecond
-		confirmed, err := w.triager.Confirm(
+		confirmed, reproduced, err := w.triager.Confirm(
 			ctx, session, w.baseURL, w.detector,
 			w.anomalyCfg, w.baselines[hit.Method+"|"+endpointPattern],
 			w.replayer, w.triageCfg.ConfirmRuns,
@@ -341,6 +349,11 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 				w.logger.Error().Err(err).Str("finding_id", findingID).Msg("update finding status failed")
 			}
 			finding.Status = model.FindingConfirmed
+			finding.Reproducibility = float64(reproduced) / float64(w.triageCfg.ConfirmRuns)
+			finding.Severity = w.triager.ScoreSeverity(
+				finding.Type, finding.Endpoint, finding.Method,
+				mutationType, finding.Reproducibility, hit.Details.HTTPStatus,
+			)
 		}
 	}
 
@@ -369,18 +382,41 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 			changed = true
 		}
 
-		// Phase 2: minimize JSON bodies in remaining exchanges
-		for i, ex := range workingSession.Entries {
-			if !triage.HasJSONBody(ex) {
+		// Phase 2: minimize request bodies in remaining exchanges
+		for i := range workingSession.Entries {
+			ct := triage.GetContentType(workingSession.Entries[i].Request)
+			var bodyMin *model.RecordingSession
+			var bodyErr error
+			switch {
+			case strings.Contains(ct, "json"):
+				bodyMin, bodyErr = w.triager.MinimizeJSONBody(
+					ctx, workingSession, i, w.baseURL,
+					w.detector, w.anomalyCfg, baseline, w.replayer,
+					timeout, w.logger,
+				)
+			case ct == "application/x-www-form-urlencoded":
+				bodyMin, bodyErr = w.triager.MinimizeQueryParams(
+					ctx, workingSession, i, w.baseURL,
+					w.detector, w.anomalyCfg, baseline, w.replayer,
+					timeout, w.logger,
+				)
+			case strings.Contains(ct, "xml"):
+				bodyMin, bodyErr = w.triager.MinimizeXMLBody(
+					ctx, workingSession, i, w.baseURL,
+					w.detector, w.anomalyCfg, baseline, w.replayer,
+					timeout, w.logger,
+				)
+			case strings.Contains(ct, "multipart/form-data"):
+				bodyMin, bodyErr = w.triager.MinimizeMultipartBody(
+					ctx, workingSession, i, w.baseURL,
+					w.detector, w.anomalyCfg, baseline, w.replayer,
+					timeout, w.logger,
+				)
+			default:
 				continue
 			}
-			bodyMin, err := w.triager.MinimizeJSONBody(
-				ctx, workingSession, i, w.baseURL,
-				w.detector, w.anomalyCfg, baseline, w.replayer,
-				timeout, w.logger,
-			)
-			if err != nil {
-				w.logger.Warn().Err(err).Str("finding_id", findingID).Int("exchange_idx", i).Msg("json body minimization failed")
+			if bodyErr != nil {
+				w.logger.Warn().Err(bodyErr).Str("finding_id", findingID).Int("exchange_idx", i).Msg("body minimization failed")
 				continue
 			}
 			if bodyMin != nil {

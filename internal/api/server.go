@@ -47,6 +47,7 @@ type FindingStore interface {
 	ListAll(ctx context.Context, campaignID, typeFilter, statusFilter string, since *time.Time, limit, offset int) ([]model.Finding, error)
 	GetByID(ctx context.Context, id string) (*model.Finding, error)
 	UpdateReproduceStatus(ctx context.Context, id, status string, runs int) error
+	UpdateFindingGroup(ctx context.Context, id, groupID string) error
 	CountByType(ctx context.Context, campaignID string) (map[model.FindingType]int, error)
 }
 

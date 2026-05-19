@@ -812,7 +812,7 @@ func TestConfirm_AllReproduced(t *testing.T) {
 	det := keyBasedDetector([]string{"trigger"})
 	rep := passthroughReplayer()
 
-	confirmed, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 3, 0, zerolog.Nop())
+	confirmed, _, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 3, 0, zerolog.Nop())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -827,7 +827,7 @@ func TestConfirm_NoneReproduced(t *testing.T) {
 	det := keyBasedDetector([]string{"trigger"}) // won't match "other"
 	rep := passthroughReplayer()
 
-	confirmed, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 3, 0, zerolog.Nop())
+	confirmed, _, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 3, 0, zerolog.Nop())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -842,7 +842,7 @@ func TestConfirm_DefaultRuns(t *testing.T) {
 	det := keyBasedDetector([]string{"trigger"})
 	rep := passthroughReplayer()
 
-	confirmed, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 0, 0, zerolog.Nop())
+	confirmed, _, err := triager.Confirm(context.Background(), session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 0, 0, zerolog.Nop())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -860,7 +860,7 @@ func TestConfirm_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := triager.Confirm(ctx, session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 5, 0, zerolog.Nop())
+	_, _, err := triager.Confirm(ctx, session, "http://localhost", det, model.AnomalyConfig{}, nil, rep, 5, 0, zerolog.Nop())
 	if err == nil {
 		t.Error("expected error with cancelled context")
 	}

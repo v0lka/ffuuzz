@@ -8,6 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 
 	"ffuuzz/internal/api"
 	"ffuuzz/internal/config"
@@ -17,8 +21,10 @@ import (
 	"ffuuzz/internal/engine"
 	"ffuuzz/internal/logging"
 	"ffuuzz/internal/mitm"
+	"ffuuzz/internal/model"
 	"ffuuzz/internal/recorder"
 	"ffuuzz/internal/store"
+	"ffuuzz/internal/triage"
 	"ffuuzz/web"
 )
 
@@ -124,6 +130,9 @@ func (c *CLI) runServe(args []string) int {
 
 	eng.StartReproduceWorker(ctx)
 
+	// Start periodic vulnerability grouping
+	go runFindingGroupingLoop(ctx, findingStore, triage.NewTriager(), 15*time.Second, logger)
+
 	select {
 	case <-ctx.Done():
 		logger.Info().Msg("shutdown signal received")
@@ -169,4 +178,40 @@ func (c *CLI) runServe(args []string) int {
 		Msg("shutdown complete")
 
 	return 0
+}
+
+// runFindingGroupingLoop periodically groups ungrouped confirmed findings.
+func runFindingGroupingLoop(ctx context.Context, store api.FindingStore, triager *triage.Triager, interval time.Duration, logger zerolog.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			findings, err := store.ListAll(ctx, "", "", string(model.FindingConfirmed), nil, 10000, 0)
+			if err != nil {
+				logger.Warn().Err(err).Msg("periodic grouping: list findings failed")
+				continue
+			}
+			var ungrouped []model.Finding
+			for _, f := range findings {
+				if f.GroupID == nil {
+					ungrouped = append(ungrouped, f)
+				}
+			}
+			if len(ungrouped) < 2 {
+				continue
+			}
+			groups := triager.GroupFindings(ungrouped)
+			for _, groupFindings := range groups {
+				groupID := uuid.New().String()
+				for _, f := range groupFindings {
+					if err := store.UpdateFindingGroup(ctx, f.ID, groupID); err != nil {
+						logger.Warn().Err(err).Str("finding_id", f.ID).Msg("periodic grouping: update failed")
+					}
+				}
+			}
+		}
+	}
 }

@@ -452,6 +452,7 @@ func findingColumns() []string {
 		"id", "campaign_id", "type", "status", "signature", "created_at", "confirmed_at",
 		"method", "endpoint", "details", "seed_recording_id", "minimized",
 		"reproduce_status", "reproduce_enqueued_at",
+		"severity", "owasp_category", "group_id", "reproducibility",
 	}
 }
 
@@ -510,7 +511,8 @@ func TestFindingStore_GetByID_Found(t *testing.T) {
 
 	rows := sqlmock.NewRows(findingColumns()).
 		AddRow("find-1", "camp-1", "SERVER_ERROR", "CONFIRMED", "sig-1", now, nil,
-			"GET", "/api/crash", details, nil, true, nil, nil)
+			"GET", "/api/crash", details, nil, true, nil, nil,
+			"MEDIUM", "A06_INSECURE_DESIGN", nil, 0.0)
 	mock.ExpectQuery("SELECT .+ FROM findings WHERE id").
 		WithArgs("find-1").
 		WillReturnRows(rows)
@@ -694,6 +696,36 @@ func TestFindingStore_UpdateStatus_UnconfirmedError(t *testing.T) {
 	}
 }
 
+func TestFindingStore_UpdateFindingGroup_Success(t *testing.T) {
+	db, mock := newTestDB(t)
+	s := NewFindingStore(db, zerolog.Nop())
+
+	findingID := "find-1"
+	groupID := "group-1"
+
+	mock.ExpectExec("UPDATE findings SET group_id").
+		WithArgs(groupID, findingID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := s.UpdateFindingGroup(context.Background(), findingID, groupID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFindingStore_UpdateFindingGroup_Error(t *testing.T) {
+	db, mock := newTestDB(t)
+	s := NewFindingStore(db, zerolog.Nop())
+
+	mock.ExpectExec("UPDATE findings SET group_id").
+		WillReturnError(errors.New("db error"))
+
+	err := s.UpdateFindingGroup(context.Background(), "find-1", "group-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestFindingStore_ListAll_Success(t *testing.T) {
 	db, mock := newTestDB(t)
 	s := NewFindingStore(db, zerolog.Nop())
@@ -703,7 +735,8 @@ func TestFindingStore_ListAll_Success(t *testing.T) {
 
 	rows := sqlmock.NewRows(findingColumns()).
 		AddRow("find-1", "camp-1", "TIMEOUT", "UNCONFIRMED", "sig-1", now, nil,
-			"GET", "/api", details, nil, false, nil, nil)
+			"GET", "/api", details, nil, false, nil, nil,
+			"INFO", "UNCATEGORIZED", nil, 0.0)
 	mock.ExpectQuery("SELECT .+ FROM findings f").
 		WillReturnRows(rows)
 
