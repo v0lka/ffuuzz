@@ -66,13 +66,40 @@ type TargetURL struct {
 	BaseURL string `json:"base_url"`
 }
 
-// CampaignLimits defines resource and duration constraints for a campaign.
+// CampaignLimits defines resource and duration constraints for a campaign,
+// plus knobs that govern endpoint-aware fairness scheduling.
 type CampaignLimits struct {
 	Workers      int   `json:"workers"`
 	RPS          int   `json:"rps"`
 	MaxTests     int   `json:"max_tests"`
 	DurationSec  int   `json:"duration_sec"`
 	ReqTimeoutMs int64 `json:"req_timeout_ms"`
+
+	// MinTestsPerEndpoint is the soft floor of tests every active endpoint
+	// receives before the UCB1 selector takes over. 0 disables the floor.
+	MinTestsPerEndpoint int `json:"min_tests_per_endpoint,omitempty"`
+
+	// SequenceShare is the probability (0..1) that a generated task is a
+	// session-mode task (mutates all exchanges) instead of a targeted
+	// per-endpoint task. 0 disables session-mode completely; 1.0 emulates
+	// the legacy whole-session behaviour.
+	SequenceShare float64 `json:"sequence_share,omitempty"`
+
+	// EndpointWeights overrides the per-endpoint scheduling weight
+	// (and may disable specific endpoints). Empty means uniform weights
+	// across all enabled endpoints.
+	EndpointWeights []EndpointWeightOverride `json:"endpoint_weights,omitempty"`
+}
+
+// EndpointWeightOverride lets the user adjust the scheduler weight of, or
+// fully disable, a specific (Method, Path) endpoint. Path is normalised at
+// validation time via endpoint.NormalizePath. An empty Method matches every
+// HTTP method on the given Path.
+type EndpointWeightOverride struct {
+	Method   string  `json:"method,omitempty"`
+	Path     string  `json:"path"`
+	Weight   float64 `json:"weight,omitempty"`
+	Disabled bool    `json:"disabled,omitempty"`
 }
 
 // MutationConfig controls which mutation strategies are enabled and their intensity.

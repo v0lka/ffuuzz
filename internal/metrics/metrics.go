@@ -7,15 +7,15 @@ import "github.com/prometheus/client_golang/prometheus"
 var (
 	reg = prometheus.NewRegistry()
 
-	TestsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+	TestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ffuuzz_tests_total",
-		Help: "Total number of fuzz tests executed.",
-	})
+		Help: "Total number of fuzz tests executed, labelled by HTTP method and normalised endpoint.",
+	}, []string{"method", "endpoint"})
 
 	FindingsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ffuuzz_findings_total",
-		Help: "Total number of findings by type.",
-	}, []string{"type"})
+		Help: "Total number of findings by type, HTTP method, and normalised endpoint.",
+	}, []string{"type", "method", "endpoint"})
 
 	RequestDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "ffuuzz_request_duration_seconds",

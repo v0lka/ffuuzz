@@ -62,7 +62,7 @@ func NewCertStore(cfg config.CertCacheConfig, tlsCfg config.TLSConfig, logger ze
 		maxEntries = 1000
 	}
 
-	cache, err := lru.NewWithEvict[string, *tls.Certificate](maxEntries, func(_ string, _ *tls.Certificate) {
+	cache, err := lru.NewWithEvict(maxEntries, func(_ string, _ *tls.Certificate) {
 		metrics.CertCacheEvictions.Inc()
 	})
 	if err != nil {

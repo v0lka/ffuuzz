@@ -149,7 +149,20 @@ func (e *Engine) StartCampaign(ctx context.Context, campaign *model.Campaign) er
 	}
 
 	cfg := campaign.Config
-	go e.runCampaign(campCtx, campaign.ID, cfg, seeds, baselines)
+
+	// Build endpoint planner. This must succeed before any worker is started
+	// because workers depend on the planner for targeted exchange selection.
+	planner, err := NewEndpointPlanner(seeds, cfg.Limits.EndpointWeights, cfg.Limits.MinTestsPerEndpoint, time.Now().UnixNano())
+	if err != nil {
+		cancel()
+		e.mu.Lock()
+		delete(e.running, campaign.ID)
+		e.mu.Unlock()
+		e.failCampaign(ctx, campaign.ID, model.CampaignRunning, fmt.Errorf("build endpoint planner: %w", err))
+		return fmt.Errorf("build endpoint planner: %w", err)
+	}
+
+	go e.runCampaign(campCtx, campaign.ID, cfg, seeds, baselines, planner)
 
 	return nil
 }
@@ -160,6 +173,7 @@ func (e *Engine) runCampaign(
 	cfg model.CampaignConfig,
 	seeds []model.RecordingSession,
 	baselines map[string]*anomaly.BaselineEntry,
+	planner *EndpointPlanner,
 ) {
 	defer func() {
 		e.mu.Lock()
@@ -257,6 +271,7 @@ func (e *Engine) runCampaign(
 			ExtractionRules:  extractionRules,
 			IntensityTracker: intensityTracker,
 			FeedbackTracker:  feedbackTracker,
+			Planner:          planner,
 			Logger:           logger,
 		})
 		go func() {
@@ -278,14 +293,30 @@ func (e *Engine) runCampaign(
 	testsGenerated := 0
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
+	// Determine the share of session-mode tasks. Validation already constrains
+	// SequenceShare to [0,1]. For backward compatibility, when the legacy
+	// Mutations.Sequence flag is true and SequenceShare is unset (<= 0),
+	// default to running every task in session mode so existing campaigns
+	// keep their previous behaviour.
+	seqShare := cfg.Limits.SequenceShare
+	if cfg.Mutations.Sequence && seqShare <= 0 {
+		seqShare = 1.0
+		logger.Info().Msg("legacy mutations.sequence=true detected; defaulting limits.sequence_share to 1.0")
+	}
+	if planner == nil {
+		seqShare = 1.0
+	}
+
 	logger.Info().
 		Int("workers", numWorkers).
 		Int("seeds", len(seeds)).
 		Int("max_tests", maxTests).
 		Int("duration_sec", durationSec).
+		Float64("sequence_share", seqShare).
+		Int("min_tests_per_endpoint", cfg.Limits.MinTestsPerEndpoint).
 		Msg("campaign running")
 
-	// Build seed ID index for weighted selection
+	// Build seed ID index for weighted selection (used in session mode).
 	seedIDs := make([]string, len(seeds))
 	for i, s := range seeds {
 		seedIDs[i] = s.ID
@@ -319,18 +350,36 @@ func (e *Engine) runCampaign(
 				return
 			}
 
-			// Pick a seed: epsilon-greedy — 20% exploration (uniform random), 80% exploitation (weighted by interest)
-			var session model.RecordingSession
-			if len(seeds) > 1 && rng.Float64() < 0.8 {
-				weights := feedbackTracker.NormalizedWeights(seedIDs)
-				session = weightedPick(seeds, weights, rng)
-			} else {
-				session = seeds[rng.Intn(len(seeds))]
-			}
+			// Decide between session-mode (whole-session replay/mutation) and
+			// targeted single-exchange mode driven by the EndpointPlanner.
 			seed := rng.Int63()
+			var task SeedTask
+			if seqShare > 0 && rng.Float64() < seqShare {
+				var session model.RecordingSession
+				if len(seeds) > 1 {
+					weights := feedbackTracker.NormalizedWeights(seedIDs)
+					session = weightedPick(seeds, weights, rng)
+				} else {
+					session = seeds[0]
+				}
+				task = SeedTask{
+					Session:      session,
+					MutationSeed: seed,
+					SessionMode:  true,
+				}
+			} else {
+				key, ref := planner.Pick()
+				task = SeedTask{
+					Session:        seeds[ref.SessionIdx],
+					MutationSeed:   seed,
+					TargetEndpoint: key,
+					TargetExchange: ref.ExchangeIdx,
+					SessionMode:    false,
+				}
+			}
 
 			select {
-			case taskCh <- SeedTask{Session: session, MutationSeed: seed}:
+			case taskCh <- task:
 				testsGenerated++
 			case <-ctx.Done():
 				return

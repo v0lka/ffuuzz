@@ -15,6 +15,12 @@ func TestRegistry_NotNil(t *testing.T) {
 
 func TestRegistry_MetricsRegistered(t *testing.T) {
 	reg := Registry()
+	// CounterVec metrics are only emitted by Gather after at least one
+	// labelled observation, so seed them here. This does not affect the
+	// other counters being checked.
+	TestsTotal.WithLabelValues("GET", "/").Inc()
+	FindingsTotal.WithLabelValues("TIMEOUT", "GET", "/").Inc()
+
 	mfs, err := reg.Gather()
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
@@ -42,8 +48,8 @@ func TestRegistry_MetricsRegistered(t *testing.T) {
 
 func TestMetrics_Increment(t *testing.T) {
 	// Test that metrics can be incremented without panic
-	TestsTotal.Inc()
-	FindingsTotal.WithLabelValues("TIMEOUT").Inc()
+	TestsTotal.WithLabelValues("GET", "/").Inc()
+	FindingsTotal.WithLabelValues("TIMEOUT", "GET", "/").Inc()
 	RequestDuration.Observe(0.5)
 	CorpusSize.Set(10)
 	CertCacheHits.Inc()
@@ -55,9 +61,9 @@ func TestMetrics_Increment(t *testing.T) {
 
 func TestFindingsTotal_Labels(t *testing.T) {
 	// Verify we can use different label values
-	FindingsTotal.WithLabelValues("SERVER_ERROR").Inc()
-	FindingsTotal.WithLabelValues("LATENCY_REGRESSION").Inc()
-	FindingsTotal.WithLabelValues("REGEX_MATCH").Inc()
+	FindingsTotal.WithLabelValues("SERVER_ERROR", "GET", "/users").Inc()
+	FindingsTotal.WithLabelValues("LATENCY_REGRESSION", "POST", "/orders").Inc()
+	FindingsTotal.WithLabelValues("REGEX_MATCH", "GET", "/api/v1/items/{_}").Inc()
 
 	// Check that gathering still works
 	reg := Registry()

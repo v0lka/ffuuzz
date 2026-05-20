@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"ffuuzz/internal/endpoint"
 	"ffuuzz/internal/model"
 )
 
@@ -60,7 +62,7 @@ func (s *Server) createCampaign(c *gin.Context) {
 	}
 
 	// Validate campaign config constraints
-	if err := validateCampaignConfig(req.Config); err != nil {
+	if err := validateCampaignConfig(&req.Config); err != nil {
 		errorResponse(c, http.StatusUnprocessableEntity, "INVALID_CONFIG", err.Error())
 		return
 	}
@@ -315,8 +317,10 @@ func (s *Server) getCampaignFindings(c *gin.Context) {
 	c.JSON(http.StatusOK, findings)
 }
 
-// validateCampaignConfig checks that campaign config parameters are logically valid.
-func validateCampaignConfig(cfg model.CampaignConfig) error {
+// validateCampaignConfig checks that campaign config parameters are logically
+// valid. It also normalises EndpointWeights (uppercasing Method and applying
+// endpoint.NormalizePath to Path), mutating cfg in place via the pointer.
+func validateCampaignConfig(cfg *model.CampaignConfig) error {
 	u, err := url.Parse(cfg.Target.BaseURL)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("target.base_url must be a valid URL")
@@ -339,7 +343,41 @@ func validateCampaignConfig(cfg model.CampaignConfig) error {
 	if cfg.Mutations.Intensity < 0 || cfg.Mutations.Intensity > 1 {
 		return fmt.Errorf("mutations.intensity must be between 0 and 1")
 	}
+	if cfg.Limits.MinTestsPerEndpoint < 0 {
+		return fmt.Errorf("limits.min_tests_per_endpoint must be >= 0")
+	}
+	if cfg.Limits.SequenceShare < 0 || cfg.Limits.SequenceShare > 1 {
+		return fmt.Errorf("limits.sequence_share must be between 0 and 1")
+	}
+	for i := range cfg.Limits.EndpointWeights {
+		ew := &cfg.Limits.EndpointWeights[i]
+		if ew.Path == "" {
+			return fmt.Errorf("limits.endpoint_weights[%d].path must not be empty", i)
+		}
+		if ew.Weight < 0 {
+			return fmt.Errorf("limits.endpoint_weights[%d].weight must be >= 0", i)
+		}
+		if ew.Method != "" {
+			method := strings.ToUpper(ew.Method)
+			if !validHTTPMethod(method) {
+				return fmt.Errorf("limits.endpoint_weights[%d].method %q is not a valid HTTP method", i, ew.Method)
+			}
+			ew.Method = method
+		}
+		ew.Path = endpoint.NormalizePath(ew.Path)
+	}
 	return nil
+}
+
+// validHTTPMethod reports whether m is a recognised HTTP method.
+func validHTTPMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions,
+		http.MethodConnect, http.MethodTrace:
+		return true
+	}
+	return false
 }
 
 type addRecordingsRequest struct {
@@ -470,7 +508,7 @@ func (s *Server) editCampaign(c *gin.Context) {
 	}
 
 	if req.Config != nil {
-		if err := validateCampaignConfig(*req.Config); err != nil {
+		if err := validateCampaignConfig(req.Config); err != nil {
 			errorResponse(c, http.StatusUnprocessableEntity, "INVALID_CONFIG", err.Error())
 			return
 		}

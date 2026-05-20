@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"ffuuzz/internal/anomaly"
+	"ffuuzz/internal/endpoint"
 	"ffuuzz/internal/metrics"
 	"ffuuzz/internal/model"
 	"ffuuzz/internal/mutate"
@@ -24,9 +25,23 @@ import (
 )
 
 // SeedTask is a unit of work for a fuzzing worker.
+//
+// When SessionMode is false (the default), the worker mutates only the
+// exchange at index TargetExchange and replays the rest verbatim. This
+// preserves session state (cookies, CSRF tokens) while letting the scheduler
+// target a single endpoint. TargetEndpoint identifies that endpoint for the
+// EndpointPlanner reward path; it is informational and may be the zero Key
+// for tasks that bypass the planner.
+//
+// When SessionMode is true, the worker mutates every exchange in the session
+// and may invoke the sequence mutator. TargetExchange is ignored in this
+// mode.
 type SeedTask struct {
-	Session      model.RecordingSession
-	MutationSeed int64
+	Session        model.RecordingSession
+	MutationSeed   int64
+	TargetEndpoint endpoint.Key
+	TargetExchange int
+	SessionMode    bool
 }
 
 // Worker executes fuzz tests: mutate -> replay -> detect -> triage.
@@ -50,6 +65,7 @@ type Worker struct {
 	extractionRules  []replayer.ExtractionRule
 	intensityTracker *IntensityTracker
 	feedbackTracker  *SeedInterestTracker
+	planner          *EndpointPlanner
 	logger           zerolog.Logger
 }
 
@@ -74,6 +90,7 @@ type WorkerConfig struct {
 	ExtractionRules  []replayer.ExtractionRule
 	IntensityTracker *IntensityTracker
 	FeedbackTracker  *SeedInterestTracker
+	Planner          *EndpointPlanner
 	Logger           zerolog.Logger
 }
 
@@ -99,6 +116,7 @@ func NewWorker(cfg WorkerConfig) *Worker {
 		extractionRules:  cfg.ExtractionRules,
 		intensityTracker: cfg.IntensityTracker,
 		feedbackTracker:  cfg.FeedbackTracker,
+		planner:          cfg.Planner,
 		logger:           cfg.Logger.With().Int("worker", cfg.ID).Logger(),
 	}
 }
@@ -268,10 +286,13 @@ func (w *Worker) Run(ctx context.Context, taskCh <-chan SeedTask) {
 func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 	rng := rand.New(rand.NewSource(task.MutationSeed))
 
-	// Apply sequence mutation if enabled
+	// Apply sequence mutation only in session-mode tasks. Targeted (per-
+	// endpoint) tasks must preserve the recorded sequence so non-target
+	// exchanges replay verbatim and provide the state context (cookies,
+	// CSRF, auth) the target exchange depends on.
 	entries := task.Session.Entries
 	var seqOps []string
-	if w.seqMutator != nil && len(entries) > 1 {
+	if task.SessionMode && w.seqMutator != nil && len(entries) > 1 {
 		result := w.seqMutator.Mutate(entries, rng, 0.5)
 		entries = result.Exchanges
 		seqOps = result.Operators
@@ -283,6 +304,12 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 	// MutationType displayed for a finding always describes the operators that
 	// touched the matching exchange — never an unrelated mutation applied to a
 	// different exchange in the same session.
+	//
+	// In targeted mode (SessionMode==false) only the exchange at index
+	// task.TargetExchange is fed to the mutation pipeline; all others are
+	// deep-copied verbatim. This keeps the planner's per-endpoint accounting
+	// honest: one task touches one endpoint by mutation, even if other
+	// exchanges echo state changes during replay.
 	mutatedEntries := make([]model.Exchange, len(entries))
 	originalEntries := make([]model.Exchange, len(entries))
 	opsByExchange := make([][]string, len(entries))
@@ -294,10 +321,14 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 		// affecting our diff baseline.
 		originalEntries[i] = deepCopyExchange(ex)
 		mutationInput := deepCopyExchange(ex)
-		result := w.pipeline.Mutate(mutationInput, rng, w.pipeline.Intensity())
-		mutatedEntries[i] = result.Exchange
-		opsByExchange[i] = result.Operators
-		allOps = append(allOps, result.Operators...)
+		if task.SessionMode || i == task.TargetExchange {
+			result := w.pipeline.Mutate(mutationInput, rng, w.pipeline.Intensity())
+			mutatedEntries[i] = result.Exchange
+			opsByExchange[i] = result.Operators
+			allOps = append(allOps, result.Operators...)
+		} else {
+			mutatedEntries[i] = mutationInput
+		}
 	}
 
 	// Record mutation operators for adaptive intensity tracking
@@ -327,15 +358,23 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 		}
 	}
 
-	// Record responses for coverage-guided feedback tracking
+	// Record responses for coverage-guided feedback tracking, and feed the
+	// per-endpoint reward to the planner. The planner reward delta uses the
+	// same novelty coefficients as the seed-level tracker so both signals
+	// stay calibrated. Reward is attributed to the unmutated request's
+	// endpoint key — this keeps URI-mutation noise out of the key derivation.
 	if w.feedbackTracker != nil {
-		for _, result := range results {
+		for i, result := range results {
 			// Only track error responses (4xx/5xx) for novelty
 			errBody := ""
 			if result.StatusCode >= 400 {
 				errBody = string(result.RespBody)
 			}
-			w.feedbackTracker.RecordResponse(task.Session.ID, result.StatusCode, errBody)
+			delta := w.feedbackTracker.RecordResponse(task.Session.ID, result.StatusCode, errBody)
+			if w.planner != nil && delta > 0 && i < len(originalEntries) {
+				k := endpoint.KeyFromExchange(originalEntries[i])
+				w.planner.Reward(k, delta)
+			}
 		}
 	}
 
@@ -344,7 +383,7 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 	// pre-mutation request so analysts see the original endpoint, not a
 	// mutated path that may have been corrupted by URI fuzzing.
 	for idx, result := range results {
-		baselineKey := result.Exchange.Request.Method + "|" + task.Session.Target.Path
+		baselineKey := endpoint.NewKey(result.Exchange.Request.Method, task.Session.Target.Path).String()
 		baseline := w.baselines[baselineKey]
 
 		hits := w.detector.Detect(result.Exchange, result, baseline, w.anomalyCfg)
@@ -369,8 +408,19 @@ func (w *Worker) processTask(ctx context.Context, task SeedTask) {
 		}
 	}
 
-	// Increment test counter
-	metrics.TestsTotal.Inc()
+	// Increment test counter. We label by HTTP method and normalised
+	// endpoint. In targeted mode the planner already provides the exact key;
+	// in session mode we derive the label from the first exchange so the
+	// metric stays queryable rather than dropping into an empty-label
+	// bucket.
+	var testKey endpoint.Key
+	switch {
+	case !task.SessionMode && task.TargetEndpoint != (endpoint.Key{}):
+		testKey = task.TargetEndpoint
+	case len(task.Session.Entries) > 0:
+		testKey = endpoint.KeyFromExchange(task.Session.Entries[0])
+	}
+	metrics.TestsTotal.WithLabelValues(testKey.Method, testKey.Path).Inc()
 	if err := w.campaigns.IncrementStats(ctx, w.campaignID, 1, 0); err != nil {
 		w.logger.Warn().Err(err).Str("campaign_id", w.campaignID).Msg("increment test stats failed")
 	}
@@ -547,7 +597,13 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 		w.feedbackTracker.RecordFinding(session.ID)
 	}
 
-	metrics.FindingsTotal.WithLabelValues(string(hit.Type)).Inc()
+	// Record finding for the endpoint planner. The planner uses this to
+	// bias future Pick() decisions toward fruitful endpoints.
+	if w.planner != nil {
+		w.planner.RecordFinding(endpoint.NewKey(hit.Method, endpointPattern))
+	}
+
+	metrics.FindingsTotal.WithLabelValues(string(hit.Type), hit.Method, endpointPattern).Inc()
 	if err := w.campaigns.IncrementStats(ctx, w.campaignID, 0, 1); err != nil {
 		w.logger.Warn().Err(err).Str("campaign_id", w.campaignID).Msg("increment finding stats failed")
 	}
@@ -560,7 +616,7 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 		timeout := time.Duration(w.reqTimeoutMs) * time.Millisecond
 		confirmed, reproduced, err := w.triager.Confirm(
 			ctx, session, w.baseURL, w.detector,
-			w.anomalyCfg, w.baselines[hit.Method+"|"+endpointPattern],
+			w.anomalyCfg, w.baselines[endpoint.NewKey(hit.Method, endpointPattern).String()],
 			w.replayer, w.triageCfg.ConfirmRuns,
 			timeout, w.logger,
 		)
@@ -581,7 +637,7 @@ func (w *Worker) handleHit(ctx context.Context, hit anomaly.AnomalyHit, session 
 
 	// Triage: minimization
 	if w.triageCfg.EnableMinimization && finding.Status == model.FindingConfirmed {
-		baseline := w.baselines[hit.Method+"|"+endpointPattern]
+		baseline := w.baselines[endpoint.NewKey(hit.Method, endpointPattern).String()]
 		workingSession := session
 		changed := false
 

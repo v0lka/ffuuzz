@@ -258,7 +258,7 @@ func TestRunCampaign_FinalStatusFromStopping(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled — simulates StopCampaign being called
 
-	e.runCampaign(ctx, "camp-stopping", cfg, seeds, nil)
+	e.runCampaign(ctx, "camp-stopping", cfg, seeds, nil, nil)
 
 	if !fallbackCalled {
 		t.Error("expected fallback STOPPING->STOPPED to be called")
@@ -437,7 +437,7 @@ func TestRunCampaign_MaxTests(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	e.runCampaign(ctx, "camp-1", cfg, seeds, baselines)
+	e.runCampaign(ctx, "camp-1", cfg, seeds, baselines, nil)
 
 	// After runCampaign returns, campaign should no longer be in running map
 	if e.IsRunning("camp-1") {
@@ -467,7 +467,7 @@ func TestRunCampaign_DurationLimit(t *testing.T) {
 	}
 
 	start := time.Now()
-	e.runCampaign(context.Background(), "camp-2", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-2", cfg, seeds, nil, nil)
 	elapsed := time.Since(start)
 
 	if elapsed > 5*time.Second {
@@ -499,7 +499,7 @@ func TestRunCampaign_ContextCancelled(t *testing.T) {
 		cancel()
 	}()
 
-	e.runCampaign(ctx, "camp-3", cfg, seeds, nil)
+	e.runCampaign(ctx, "camp-3", cfg, seeds, nil, nil)
 	// Should complete without hanging
 }
 
@@ -525,7 +525,7 @@ func TestRunCampaign_WithRateLimit(t *testing.T) {
 		},
 	}
 
-	e.runCampaign(context.Background(), "camp-4", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-4", cfg, seeds, nil, nil)
 }
 
 func TestRunCampaign_WithSequenceMutation(t *testing.T) {
@@ -556,7 +556,7 @@ func TestRunCampaign_WithSequenceMutation(t *testing.T) {
 		},
 	}
 
-	e.runCampaign(context.Background(), "camp-5", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-5", cfg, seeds, nil, nil)
 }
 
 func TestRunCampaign_DefaultWorkers(t *testing.T) {
@@ -577,7 +577,7 @@ func TestRunCampaign_DefaultWorkers(t *testing.T) {
 		Limits: model.CampaignLimits{Workers: 0, MaxTests: 1}, // 0 workers -> default 4
 	}
 
-	e.runCampaign(context.Background(), "camp-default", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-default", cfg, seeds, nil, nil)
 }
 
 func TestRunCampaign_Anomaly5xxDetection(t *testing.T) {
@@ -611,7 +611,7 @@ func TestRunCampaign_Anomaly5xxDetection(t *testing.T) {
 		Anomaly: model.AnomalyConfig{Detect5xx: true},
 	}
 
-	e.runCampaign(context.Background(), "camp-anomaly", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-anomaly", cfg, seeds, nil, nil)
 	// At least some findings should be created for 500 errors
 	if findingsCreated == 0 {
 		t.Log("no findings created (dedup may have caught them)")
@@ -645,7 +645,7 @@ func TestRunCampaign_WithConfirmation(t *testing.T) {
 		Triage:  model.TriageConfig{ConfirmRuns: 2},
 	}
 
-	e.runCampaign(context.Background(), "camp-confirm", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-confirm", cfg, seeds, nil, nil)
 }
 
 func TestRunCampaign_WithMinimization(t *testing.T) {
@@ -669,7 +669,7 @@ func TestRunCampaign_WithMinimization(t *testing.T) {
 		Triage:  model.TriageConfig{ConfirmRuns: 1, EnableMinimization: true},
 	}
 
-	e.runCampaign(context.Background(), "camp-minimize", cfg, seeds, nil)
+	e.runCampaign(context.Background(), "camp-minimize", cfg, seeds, nil, nil)
 }
 
 func TestNewWorker(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"ffuuzz/internal/endpoint"
 	"ffuuzz/internal/model"
 )
 
@@ -67,18 +68,15 @@ type BaselineEntry struct {
 }
 
 // ComputeBaseline calculates per-endpoint p50 latency from recording sessions.
+// Endpoints are keyed by endpoint.Key, so requests with parametric paths that
+// differ only by ID-like segments are aggregated together.
 func ComputeBaseline(sessions []model.RecordingSession) map[string]BaselineEntry {
-	type key struct {
-		method   string
-		endpoint string
-	}
-
-	latencies := make(map[key][]int64)
-	statuses := make(map[key]int)
+	latencies := make(map[endpoint.Key][]int64)
+	statuses := make(map[endpoint.Key]int)
 
 	for _, sess := range sessions {
 		for _, ex := range sess.Entries {
-			k := key{method: ex.Request.Method, endpoint: sess.Target.Path}
+			k := endpoint.NewKey(ex.Request.Method, sess.Target.Path)
 			latencies[k] = append(latencies[k], ex.DurationMs)
 			statuses[k] = ex.Response.Status
 		}
@@ -94,10 +92,9 @@ func ComputeBaseline(sessions []model.RecordingSession) map[string]BaselineEntry
 		} else {
 			p50 = lats[n/2]
 		}
-		mapKey := k.method + "|" + k.endpoint
-		result[mapKey] = BaselineEntry{
-			Method:     k.method,
-			Endpoint:   k.endpoint,
+		result[k.String()] = BaselineEntry{
+			Method:     k.Method,
+			Endpoint:   k.Path,
 			P50Ms:      p50,
 			StatusCode: statuses[k],
 		}
