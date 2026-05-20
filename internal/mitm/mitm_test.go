@@ -3,6 +3,7 @@ package mitm
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -916,4 +917,85 @@ func TestHandleCONNECT_FullHTTPS(t *testing.T) {
 		return
 	}
 	_ = httpResp.Body.Close()
+}
+
+func TestMitm_HTTP_GzipResponse_StoredDecompressed(t *testing.T) {
+	const plainBody = `{"hello":"world"}`
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		gz := gzip.NewWriter(w)
+		_, _ = gz.Write([]byte(plainBody))
+		_ = gz.Close()
+	}))
+	defer backend.Close()
+
+	logPath := filepath.Join(t.TempDir(), "gzip_test.jsonl")
+	rec, err := recorder.NewJSONL(logPath)
+	if err != nil {
+		t.Fatalf("NewJSONL: %v", err)
+	}
+	defer func() { _ = rec.Close() }()
+
+	cs := testCertStore(t, t.TempDir())
+	addr := startProxy(t, rec, cs, 16*1024)
+
+	// DisableCompression prevents the client-side auto-decompress; setting
+	// Accept-Encoding: gzip explicitly causes Go's Transport to skip adding
+	// its own header and also skip transparent decompression on the response,
+	// so the proxy's RoundTrip sees raw gzip bytes — the real-world scenario.
+	rawClient := &http.Client{
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				return url.Parse("http://" + addr)
+			},
+			DisableCompression: true,
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", backend.URL+"/gz", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := rawClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET via proxy: %v", err)
+	}
+	clientBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+
+	// Client receives the raw gzip stream (proxy must forward it as-is).
+	if resp.Header.Get("Content-Encoding") != "gzip" {
+		t.Errorf("expected Content-Encoding: gzip in client response, got %q", resp.Header.Get("Content-Encoding"))
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(clientBody))
+	if err != nil {
+		t.Fatalf("client body is not valid gzip: %v", err)
+	}
+	decompressed, _ := io.ReadAll(gr)
+	_ = gr.Close()
+	if string(decompressed) != plainBody {
+		t.Errorf("client decompressed body = %q, want %q", decompressed, plainBody)
+	}
+
+	// Recorded body must be plain text (decompressed) and Content-Encoding
+	// must not be present in the stored headers.
+	lastTx := readLastTx(t, logPath, 2*time.Second)
+
+	if ce := lastTx.RespHeaders["Content-Encoding"]; len(ce) > 0 {
+		t.Errorf("recorded resp_headers still contains Content-Encoding: %v", ce)
+	}
+
+	recordedBody, err := base64.StdEncoding.DecodeString(lastTx.RespBody)
+	if err != nil {
+		t.Fatalf("base64 decode recorded body: %v", err)
+	}
+	if string(recordedBody) != plainBody {
+		t.Errorf("recorded body = %q, want %q", recordedBody, plainBody)
+	}
 }

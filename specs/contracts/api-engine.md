@@ -18,14 +18,15 @@ type Server struct {
 ```
 
 This is acceptable because:
+
 - There is exactly one engine implementation
 - The engine is a domain orchestration component, not an infrastructure adapter
 - The API and engine are in different layers (boundary vs domain), but within the same codebase
 
 ## Implementations
 
-| Package | Type | Notes |
-|---------|------|-------|
+| Package           | Type     | Notes                                        |
+| ----------------- | -------- | -------------------------------------------- |
 | `internal/engine` | `Engine` | Sole implementation, wired in `cli/serve.go` |
 
 ## Initialization
@@ -43,12 +44,14 @@ apiSrv := api.NewServer(api.ServerConfig{
 
 ## Operations Exposed to API
 
-| API handler | Engine method | Description |
-|---|---|---|
-| `startCampaign` | `eng.StartCampaign(ctx, campaign)` | Start fuzzing campaign |
-| `stopCampaign` | `eng.StopCampaign(ctx, id)` | Stop running campaign |
-| `getCampaignStats` | `eng.IsRunning(id)` | Check if campaign is running |
-| `reproduceFinding` | (indirectly via finding store) | Enqueues reproduce job |
+| API handler        | Engine method                      | Description                                                      |
+| ------------------ | ---------------------------------- | ---------------------------------------------------------------- |
+| `startCampaign`    | `eng.StartCampaign(ctx, campaign)` | Start fuzzing campaign                                           |
+| `stopCampaign`     | `eng.StopCampaign(ctx, id)`        | Stop running campaign                                            |
+| `getCampaignStats` | `eng.IsRunning(id)`                | Check if campaign is running                                     |
+| `reproduceFinding` | (indirectly via finding store)     | Enqueues reproduce job                                           |
+| `analyzeFinding`   | `s.llmTriager.AnalyzeFinding(...)` | Single-finding LLM analysis (synchronous, 200)                   |
+| `analyzeCampaign`  | `s.llmTriager.BatchAnalyze(...)`   | Batch LLM analysis of unconfirmed findings (async, 202 Accepted) |
 
 The `IsRunning` check is used in the stats endpoint to determine which stats field to include (real-time computed vs. stored).
 
@@ -83,6 +86,31 @@ POST /api/v1/findings/:id/reproduce
     │   ├── findings.UpdateReproduceStatus(id, "ENQUEUED", 0)
     │   └── Return 202 Accepted
     │   (ReproduceWorker picks up the job asynchronously)
+    │
+POST /api/v1/findings/:id/analyze
+    │
+    ├── api.analyzeFinding handler
+    │   ├── Parse finding ID
+    │   ├── s.llmTriager == nil → 503 LLM_DISABLED
+    │   ├── Load finding + artifact from DB
+    │   ├── s.llmTriager.AnalyzeFinding(ctx, finding, artifactPayload)
+    │   ├── findings.UpdateLLMAnalysis(ctx, id, analysisJSON)
+    │   └── Return 200 OK with *LLMAnalysis JSON
+    │
+POST /api/v1/campaigns/:id/analyze
+    │
+    ├── api.analyzeCampaign handler
+    │   ├── Parse campaign ID
+    │   ├── s.llmTriager == nil → 503 LLM_DISABLED
+    │   ├── List unconfirmed findings (limit 10000)
+    │   ├── 0 findings → 200 OK {"analyzed": 0, "message": "..."}
+    │   ├── Return 202 Accepted {"message": "analysis started", "total": N}
+    │   └── Background goroutine:
+    │       ├── context.WithTimeout(10 min)
+    │       ├── s.llmTriager.BatchAnalyze(ctx, findings, artifactGetter, onResult)
+    │       └── Each result persisted via findings.UpdateLLMAnalysis
+    │
+    │   The frontend polls GET /api/v1/campaigns/:id/findings for progress.
 ```
 
 ## Breaking Change Checklist

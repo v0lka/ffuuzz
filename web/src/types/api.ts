@@ -76,6 +76,13 @@ export interface MutationConfig {
     params: boolean;
     sequence: boolean;
     intensity: number;
+    // Per-category operator filters. Nil/empty means all operators enabled.
+    uri_operators?: string[];
+    header_operators?: string[];
+    json_operators?: string[];
+    param_operators?: string[];
+    primitive_operators?: string[];
+    sequence_operators?: string[];
 }
 
 export interface AnomalyConfig {
@@ -140,6 +147,17 @@ export interface FindingDetails {
     http_status?: number;
 }
 
+export interface LLMAnalysis {
+    classification: string;
+    severity: string;
+    confidence: number;
+    exploitability: string;
+    remediation: string;
+    description: string;
+    analyzed_at: string;
+    model_used: string;
+}
+
 export interface Finding {
     id: string;
     campaign_id: string;
@@ -158,6 +176,7 @@ export interface Finding {
     reproduce_enqueued_at?: string;
     mutation_type?: string;
     mutation_payload?: string;
+    llm_analysis?: LLMAnalysis;
 }
 
 export interface FailureCriterion {
@@ -211,6 +230,12 @@ export interface CreateCampaignRequest {
     config: CampaignConfig;
 }
 
+export interface UpdateCampaignRequest {
+    name?: string;
+    recording_ids?: string[];
+    config?: CampaignConfig;
+}
+
 export interface TreePathNode {
     segment: string;
     full_path: string;
@@ -233,4 +258,76 @@ export interface DeleteByPrefixResponse {
 
 export interface AddRecordingsResponse {
     added: number;
+}
+
+// --- Application configuration types (mirrors internal/config/config.go) ---
+
+export interface TLSConfigResponse {
+    min_version: "1.2" | "1.3";
+    handshake_timeout: string;
+    disable_session_tickets: boolean;
+}
+
+export interface CertCacheConfigResponse {
+    max_entries: number;
+    memory_only: boolean;
+    cert_dir: string;
+}
+
+export interface LLMConfigResponse {
+    enabled: boolean;
+    provider: string;
+    api_key: string;       // masked as "••••••••" if set
+    base_url: string;
+    model: string;
+    max_tokens: number;
+    timeout: string;
+}
+
+export interface ConfigResponse {
+    api_address: string;
+    proxy_address: string;
+    database_uri: string;
+    artifact_dir: string;
+    req_timeout: string;
+    shutdown_timeout: string;
+    workers: number;
+    rps: number;
+    max_body_bytes: number;
+    tls_skip_verify: boolean;
+    tls: TLSConfigResponse;
+    cert_cache: CertCacheConfigResponse;
+    llm: LLMConfigResponse;
+}
+
+export interface ConfigUpdateRequest {
+    api_address?: string;
+    proxy_address?: string;
+    database_uri?: string;
+    artifact_dir?: string;
+    req_timeout?: string;
+    shutdown_timeout?: string;
+    workers?: number;
+    rps?: number;
+    max_body_bytes?: number;
+    tls_skip_verify?: boolean;
+    tls?: Partial<TLSConfigResponse>;
+    cert_cache?: Partial<CertCacheConfigResponse>;
+    llm?: Partial<LLMConfigResponse>;
+}
+
+export interface ConfigSaveResponse {
+    message: string;
+}
+
+export interface FieldError {
+    field: string;
+    message: string;
+}
+
+export interface ConfigValidationError {
+    error: string;
+    message: string;
+    request_id: string;
+    fields?: FieldError[];
 }

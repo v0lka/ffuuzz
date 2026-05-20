@@ -105,9 +105,29 @@ describe("FindingsTable", () => {
         expect(screen.getByText("string_mutation")).toBeInTheDocument();
     });
 
-    // ── 6. Mutation payload via TruncatedEndpoint ──────────────
+    // ── 6. Endpoint with CSS ellipsis ─────────────────────────
 
-    it("renders mutation_payload using TruncatedEndpoint", () => {
+    it("renders endpoint with title tooltip and CSS ellipsis on inner div", () => {
+        render(
+            <FindingsTable
+                findings={[createTestFinding({ endpoint: "/api/v1/users/long/path" })]}
+            />,
+            ROUTE,
+        );
+
+        // The endpoint text is rendered inside a <div> with CSS ellipsis (auto table layout)
+        const el = screen.getByText("/api/v1/users/long/path");
+        expect(el).toBeInTheDocument();
+        // title and text-ellipsis are on the inner <div>, not the <td>
+        const div = el.closest("div");
+        expect(div).toHaveAttribute("title", "/api/v1/users/long/path");
+        expect(div!.className).toContain("text-ellipsis");
+        expect(div!.className).toContain("overflow-hidden");
+    });
+
+    // ── 7. Payload with CSS ellipsis ────────────
+
+    it("renders payload with title tooltip and CSS ellipsis on inner div", () => {
         render(
             <FindingsTable
                 findings={[createTestFinding({ mutation_payload: '{"foo":"bar"}' })]}
@@ -115,13 +135,102 @@ describe("FindingsTable", () => {
             ROUTE,
         );
 
-        // TruncatedEndpoint renders the value as text with a title tooltip.
         const el = screen.getByText('{"foo":"bar"}');
         expect(el).toBeInTheDocument();
-        expect(el).toHaveAttribute("title", '{"foo":"bar"}');
+        // title and text-ellipsis are on the inner <div>, not the <td>
+        const div = el.closest("div");
+        expect(div).toHaveAttribute("title", '{"foo":"bar"}');
+        expect(div!.className).toContain("text-ellipsis");
+        expect(div!.className).toContain("overflow-hidden");
     });
 
-    // ── 7. Campaign name from campaignNames Map ────────────────
+    it("renders dash for missing mutation_payload", () => {
+        render(
+            <FindingsTable
+                findings={[createTestFinding({ mutation_payload: undefined })]}
+            />,
+            ROUTE,
+        );
+
+        const el = screen.getByText("-");
+        expect(el).toBeInTheDocument();
+        // title on the inner <div>
+        const div = el.closest("div");
+        expect(div).toHaveAttribute("title", "-");
+    });
+
+    // ── 8. LLM classification shown in Status column (uppercase, green) ──
+
+    it("renders LLM classification in UPPERCASE with badge-success for vulnerabilities", () => {
+        render(
+            <FindingsTable
+                findings={[
+                    createTestFinding({
+                        llm_analysis: {
+                            classification: "SQL Injection",
+                            severity: "HIGH",
+                            confidence: 0.9,
+                            exploitability: "Easy",
+                            remediation: "Use parameterized queries",
+                            description: "SQL injection found",
+                            analyzed_at: "2025-01-01T00:00:00Z",
+                            model_used: "gpt-4",
+                        },
+                    }),
+                ]}
+            />,
+            ROUTE,
+        );
+
+        expect(screen.getByText("SQL INJECTION")).toBeInTheDocument();
+        expect(screen.getByText("LLM")).toBeInTheDocument();
+        const badge = screen.getByTitle("LLM triage: SQL INJECTION");
+        expect(badge).toBeInTheDocument();
+        expect(badge.className).toContain("badge-success");
+    });
+
+    it("renders NO VULNERABILITY classification with badge-ghost", () => {
+        render(
+            <FindingsTable
+                findings={[
+                    createTestFinding({
+                        llm_analysis: {
+                            classification: "No Vulnerability",
+                            severity: "INFO",
+                            confidence: 0.2,
+                            exploitability: "N/A",
+                            remediation: "N/A",
+                            description: "No security impact",
+                            analyzed_at: "2025-01-01T00:00:00Z",
+                            model_used: "gpt-4",
+                        },
+                    }),
+                ]}
+            />,
+            ROUTE,
+        );
+
+        expect(screen.getByText("NO VULNERABILITY")).toBeInTheDocument();
+        const badge = screen.getByTitle("LLM triage: NO VULNERABILITY");
+        expect(badge).toBeInTheDocument();
+        expect(badge.className).toContain("badge-ghost");
+    });
+
+    // ── 8. FindingStatusBadge shown when no llm_analysis ──────
+
+    it("renders FindingStatusBadge when no llm_analysis", () => {
+        render(
+            <FindingsTable
+                findings={[createTestFinding({ status: "CONFIRMED" })]}
+            />,
+            ROUTE,
+        );
+
+        expect(screen.getByText("CONFIRMED")).toBeInTheDocument();
+        expect(screen.queryByText("LLM")).not.toBeInTheDocument();
+    });
+
+    // ── 9. Campaign name from campaignNames Map ────────────────
 
     it("links campaign name when showCampaign=true with campaignNames Map", () => {
         render(
@@ -139,7 +248,7 @@ describe("FindingsTable", () => {
         expect(link).toHaveAttribute("href", "/ui/campaigns/camp-abc12345");
     });
 
-    // ── 8. Fallback to truncated campaign_id ───────────────────
+    // ── 10. Fallback to truncated campaign_id ──────────────────
 
     it("falls back to campaign_id truncated when no campaignNames provided", () => {
         render(

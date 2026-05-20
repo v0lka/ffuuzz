@@ -1,9 +1,10 @@
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { useParams, Link, useLocation } from "react-router-dom";
+import { ArrowLeft, RefreshCw, Sparkles } from "lucide-react";
 import {
     useFinding,
     useFindingArtifact,
     useReproduceFinding,
+    useAnalyzeFinding,
 } from "@/hooks/queries";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { ErrorAlert } from "@/components/ErrorAlert";
@@ -13,10 +14,13 @@ import { formatDateTime } from "@/components/TimeAgo";
 
 export default function FindingDetailPage() {
     const { id } = useParams<{ id: string }>();
+    const location = useLocation();
     const safeId = id ?? "";
+    const backTo = (location.state as { from?: string } | null)?.from ?? "/findings";
     const { data, isLoading, error } = useFinding(safeId);
     const artifact = useFindingArtifact(safeId, !!data?.artifact_id);
     const reproduceMutation = useReproduceFinding();
+    const analyzeMutation = useAnalyzeFinding();
 
     if (!id) return <ErrorAlert message="Missing finding ID" />;
     if (isLoading) return <LoadingSpinner />;
@@ -28,7 +32,7 @@ export default function FindingDetailPage() {
 
     return (
         <div className="space-y-6">
-            <Link to="/findings" className="btn btn-ghost btn-sm gap-1">
+            <Link to={backTo} className="btn btn-ghost btn-sm gap-1">
                 <ArrowLeft size={16} />
                 Back
             </Link>
@@ -127,8 +131,52 @@ export default function FindingDetailPage() {
                 </div>
             )}
 
-            {/* Reproduce */}
-            <div className="flex items-center gap-3">
+            {/* LLM Analysis results */}
+            {f.llm_analysis && (
+                <div className="card bg-base-200">
+                    <div className="card-body p-4 text-sm space-y-3">
+                        <h3 className="font-semibold">LLM Analysis</h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="badge badge-primary">
+                                {f.llm_analysis.classification}
+                            </span>
+                            <span className="badge badge-warning">
+                                {f.llm_analysis.severity}
+                            </span>
+                            <span className="badge badge-ghost">
+                                Confidence: {(f.llm_analysis.confidence * 100).toFixed(0)}%
+                            </span>
+                        </div>
+                        {f.llm_analysis.exploitability && (
+                            <div>
+                                <span className="opacity-60">Exploitability:</span>
+                                <p className="mt-1">{f.llm_analysis.exploitability}</p>
+                            </div>
+                        )}
+                        {f.llm_analysis.remediation && (
+                            <div>
+                                <span className="opacity-60">Remediation:</span>
+                                <p className="mt-1">{f.llm_analysis.remediation}</p>
+                            </div>
+                        )}
+                        {f.llm_analysis.description && (
+                            <div>
+                                <span className="opacity-60">Description:</span>
+                                <p className="mt-1">{f.llm_analysis.description}</p>
+                            </div>
+                        )}
+                        <div className="text-xs opacity-50">
+                            Analyzed: {formatDateTime(f.llm_analysis.analyzed_at)}
+                            {f.llm_analysis.model_used && (
+                                <> &middot; Model: {f.llm_analysis.model_used}</>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 flex-wrap">
                 <button
                     className="btn btn-outline btn-sm"
                     disabled={isReproducing || reproduceMutation.isPending}
@@ -136,6 +184,18 @@ export default function FindingDetailPage() {
                 >
                     <RefreshCw size={16} />
                     Reproduce (3 runs)
+                </button>
+                <button
+                    className="btn btn-outline btn-sm btn-accent"
+                    disabled={analyzeMutation.isPending}
+                    onClick={() => analyzeMutation.mutate(safeId)}
+                >
+                    {analyzeMutation.isPending ? (
+                        <span className="loading loading-spinner loading-sm" />
+                    ) : (
+                        <Sparkles size={16} />
+                    )}
+                    Analyze with LLM
                 </button>
                 {f.reproduce_status && (
                     <span className="badge badge-sm badge-info">

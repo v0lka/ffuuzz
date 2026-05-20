@@ -69,10 +69,11 @@ func (c *CLI) runServe(args []string) int {
 		findingStore,
 		artifactStore,
 		corpusMgr,
-		llmTriager,
 		cfg.ArtifactDir,
 		logger,
 	)
+
+	eng.RecoverStuckCampaigns(context.Background())
 
 	if err := os.MkdirAll(cfg.ArtifactDir, 0o750); err != nil {
 		logger.Fatal().Err(err).Msg("failed to create artifact directory")
@@ -125,6 +126,7 @@ func (c *CLI) runServe(args []string) int {
 		ArtifactDir: cfg.ArtifactDir,
 		WebFS:       webFS,
 		Logger:      logger,
+		EnvPath:     ".env",
 	})
 
 	go func() {

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
     useQuery,
     useMutation,
@@ -7,9 +8,12 @@ import type {
     Campaign,
     CampaignConfig,
     CampaignStats,
+    ConfigResponse,
     CreateCampaignRequest,
+    UpdateCampaignRequest,
     Finding,
     ArtifactPayload,
+    LLMAnalysis,
     RecordingSession,
     TreeOrigin,
     HealthResponse,
@@ -18,6 +22,8 @@ import * as recordingsApi from "@/api/recordings";
 import * as campaignsApi from "@/api/campaigns";
 import * as findingsApi from "@/api/findings";
 import * as healthApi from "@/api/health";
+import * as configApi from "@/api/config";
+import type { ConfigUpdateRequest } from "@/types/api";
 
 export const queryKeys = {
     recordings: {
@@ -45,6 +51,7 @@ export const queryKeys = {
         artifact: (id: string) => ["findings", "artifact", id] as const,
     },
     health: ["health"] as const,
+    config: ["config"] as const,
 };
 
 export function useRecordings(params?: {
@@ -226,6 +233,36 @@ export function useAddRecordingsToCampaign() {
     });
 }
 
+export function useUpdateCampaign() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({ id, req }: { id: string; req: UpdateCampaignRequest }) =>
+            campaignsApi.updateCampaign(id, req),
+        onSuccess: (_data, { id }) => {
+            void qc.invalidateQueries({
+                queryKey: queryKeys.campaigns.detail(id),
+            });
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns.all });
+            void qc.invalidateQueries({
+                queryKey: queryKeys.campaigns.config(id),
+            });
+        },
+    });
+}
+
+export function useQuickCreateCampaign() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (req: {
+            name: string;
+            filter: { scheme: string; host: string; port: number; path_prefix?: string };
+        }) => campaignsApi.quickCreateCampaign(req),
+        onSuccess: () => {
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns.all });
+        },
+    });
+}
+
 export function useFindings(params?: {
     campaign_id?: string;
     type?: string;
@@ -269,10 +306,93 @@ export function useReproduceFinding() {
     });
 }
 
+export function useAnalyzeFinding() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id: string) => findingsApi.analyzeFinding(id),
+        onSuccess: (_data: LLMAnalysis, id: string) => {
+            void qc.invalidateQueries({
+                queryKey: queryKeys.findings.detail(id),
+            });
+        },
+    });
+}
+
+export function useAnalyzeCampaign() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (id: string) => campaignsApi.analyzeCampaign(id),
+        onSuccess: (_data, id: string) => {
+            void qc.invalidateQueries({
+                queryKey: queryKeys.campaigns.detail(id),
+            });
+            void qc.invalidateQueries({
+                queryKey: queryKeys.campaigns.findings(id),
+            });
+        },
+    });
+}
+
+export function useBatchAnalysisProgress(
+    campaignId: string,
+    total: number,
+    enabled: boolean,
+) {
+    const qc = useQueryClient();
+    const prevAnalyzed = useRef(0);
+
+    const query = useQuery<{ analyzed: number; total: number }>({
+        queryKey: ["batchAnalysis", campaignId],
+        queryFn: async () => {
+            const findings = await campaignsApi.getCampaignFindings(campaignId, {
+                limit: 10000,
+            });
+            const pending = findings.filter(
+                (f) => !f.llm_analysis,
+            );
+            return {
+                analyzed: findings.length - pending.length,
+                total: total || findings.length,
+            };
+        },
+        enabled: enabled && total > 0,
+        refetchInterval: 2_000,
+    });
+
+    // Invalidate finding detail caches as batch analysis progresses,
+    // so navigating to a finding page shows fresh LLM analysis results.
+    useEffect(() => {
+        if (query.data && query.data.analyzed > prevAnalyzed.current) {
+            prevAnalyzed.current = query.data.analyzed;
+            void qc.invalidateQueries({ queryKey: queryKeys.findings.all });
+        }
+    }, [query.data, qc]);
+
+    return query;
+}
+
 export function useHealth() {
     return useQuery<HealthResponse>({
         queryKey: queryKeys.health,
         queryFn: () => healthApi.getHealth(),
         refetchInterval: 30_000,
+    });
+}
+
+export function useConfig() {
+    return useQuery<ConfigResponse>({
+        queryKey: queryKeys.config,
+        queryFn: () => configApi.getConfig(),
+        staleTime: 60_000,
+    });
+}
+
+export function useUpdateConfig() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (req: ConfigUpdateRequest) => configApi.updateConfig(req),
+        onSuccess: () => {
+            void qc.invalidateQueries({ queryKey: queryKeys.config });
+        },
     });
 }

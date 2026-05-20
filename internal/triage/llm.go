@@ -49,15 +49,16 @@ func (t *LLMTriager) AnalyzeFinding(
 	}
 
 	req := LLMAnalysisRequest{
-		FindingID:       finding.ID,
-		FindingType:     string(finding.Type),
-		Method:          finding.Method,
-		Endpoint:        finding.Endpoint,
-		MutationType:    finding.MutationType,
-		MutationPayload: finding.MutationPayload,
-		BaselineStatus:  baselineStatus,
-		AnomalousStatus: anomalousStatus,
-		ResponseSnippet: responseSnippet,
+		FindingID:        finding.ID,
+		FindingType:      string(finding.Type),
+		Method:           finding.Method,
+		Endpoint:         finding.Endpoint,
+		MutationType:     finding.MutationType,
+		MutationPayload:  finding.MutationPayload,
+		BaselineStatus:   baselineStatus,
+		AnomalousStatus:  anomalousStatus,
+		ResponseSnippet:  responseSnippet,
+		PreviousAnalysis: finding.LLMAnalysis,
 	}
 
 	result, err := t.provider.AnalyzeFinding(ctx, req)
@@ -98,11 +99,12 @@ func (t *LLMTriager) GenerateDescription(ctx context.Context, finding *model.Fin
 // BatchAnalyze processes multiple findings through LLM analysis.
 // artifactGetter is called for each finding to load its artifact data.
 // onResult is called for each successfully analyzed finding for persistence.
+// Both callbacks receive ctx so they can respect cancellation and timeouts.
 func (t *LLMTriager) BatchAnalyze(
 	ctx context.Context,
 	findings []model.Finding,
-	artifactGetter func(findingID string) (*model.ArtifactPayload, error),
-	onResult func(findingID string, analysis *model.LLMAnalysis),
+	artifactGetter func(ctx context.Context, findingID string) (*model.ArtifactPayload, error),
+	onResult func(ctx context.Context, findingID string, analysis *model.LLMAnalysis),
 ) {
 	if t.provider == nil {
 		return
@@ -117,9 +119,9 @@ func (t *LLMTriager) BatchAnalyze(
 		}
 
 		var artifact *model.ArtifactPayload
-		if artifactGetter != nil {
+		if artifactGetter != nil && f.ArtifactID != "" {
 			var err error
-			artifact, err = artifactGetter(f.ArtifactID)
+			artifact, err = artifactGetter(ctx, f.ArtifactID)
 			if err != nil {
 				t.logger.Warn().Err(err).Str("finding_id", f.ID).Msg("llm batch: load artifact failed")
 			}
@@ -132,7 +134,7 @@ func (t *LLMTriager) BatchAnalyze(
 			continue
 		}
 		if analysis != nil && onResult != nil {
-			onResult(f.ID, analysis)
+			onResult(ctx, f.ID, analysis)
 		}
 
 		if (i+1)%10 == 0 {

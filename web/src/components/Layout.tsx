@@ -4,6 +4,7 @@ import {
     Disc3,
     Rocket,
     AlertTriangle,
+    Settings,
     Sun,
     Moon,
     Activity,
@@ -17,6 +18,7 @@ const navItems = [
     { to: "/recordings", icon: Disc3, label: "Recordings" },
     { to: "/campaigns", icon: Rocket, label: "Campaigns" },
     { to: "/findings", icon: AlertTriangle, label: "Findings" },
+    { to: "/config", icon: Settings, label: "Configuration" },
 ];
 
 function ThemeToggle() {
@@ -72,7 +74,7 @@ export default function Layout() {
                 </header>
 
                 {/* Main content */}
-                <main className="flex-1 p-4 md:p-6 lg:p-8">
+                <main className="flex-1 p-4 md:p-6 lg:p-8 flex flex-col">
                     <Outlet />
                 </main>
             </div>

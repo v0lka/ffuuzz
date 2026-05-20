@@ -60,9 +60,6 @@ func (m *mockReproduceFindingStore) UpdateStatus(ctx context.Context, id string,
 	}
 	return nil
 }
-func (m *mockReproduceFindingStore) UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error {
-	return nil
-}
 
 // mockReproduceArtifactStore extends mockArtifactStore with GetByFindingID.
 type mockReproduceArtifactStore struct {
@@ -343,7 +340,6 @@ func TestStartReproduceWorker(t *testing.T) {
 		&mockReproduceFindingStore{},
 		&mockReproduceArtifactStore{},
 		nil,
-		nil,
 		"/tmp",
 		zerolog.Nop(),
 	)
@@ -370,7 +366,6 @@ func TestStopAll_WithReproduceWorker(t *testing.T) {
 		&mockReproduceFindingStore{},
 		&mockReproduceArtifactStore{},
 		nil,
-		nil,
 		"/tmp",
 		zerolog.Nop(),
 	)
@@ -387,7 +382,6 @@ func TestStopAll_NoReproduceWorker(t *testing.T) {
 		&mockCampaignStore{},
 		&mockReproduceFindingStore{},
 		&mockReproduceArtifactStore{},
-		nil,
 		nil,
 		"/tmp",
 		zerolog.Nop(),

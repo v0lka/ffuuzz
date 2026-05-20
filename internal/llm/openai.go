@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -28,6 +29,9 @@ func newOpenAIProvider(cfg config.LLMConfig, logger zerolog.Logger) *openAIProvi
 	if cfg.BaseURL != "" {
 		clientCfg.BaseURL = cfg.BaseURL
 	}
+	clientCfg.HTTPClient = &http.Client{
+		Timeout: cfg.Timeout + 10*time.Second,
+	}
 	return &openAIProvider{
 		client:    openai.NewClientWithConfig(clientCfg),
 		model:     cfg.Model,
@@ -43,14 +47,17 @@ func (p *openAIProvider) AnalyzeFinding(ctx context.Context, req triage.LLMAnaly
 
 	prompt := triage.BuildAnalyzeFindingPrompt(req)
 
+	seed := 0
 	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: p.model,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: triage.AnalyzeFindingSystemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
 		},
-		MaxTokens:   p.maxTokens,
-		Temperature: 0.1,
+		MaxTokens:       p.maxTokens,
+		Temperature:     0.1,
+		Seed:            &seed,
+		ReasoningEffort: "high",
 		ResponseFormat: &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
 		},
@@ -78,8 +85,9 @@ func (p *openAIProvider) GenerateDescription(ctx context.Context, req triage.LLM
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
 		},
-		MaxTokens:   256,
-		Temperature: 0.3,
+		MaxTokens:       256,
+		Temperature:     0.1,
+		ReasoningEffort: "low",
 	})
 	if err != nil {
 		return "", fmt.Errorf("openai description: %w", err)
@@ -102,8 +110,9 @@ func (p *openAIProvider) GenerateReport(ctx context.Context, findings []triage.L
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
 		},
-		MaxTokens:   p.maxTokens,
-		Temperature: 0.3,
+		MaxTokens:       p.maxTokens,
+		Temperature:     0.1,
+		ReasoningEffort: "low",
 	})
 	if err != nil {
 		return "", fmt.Errorf("openai report: %w", err)

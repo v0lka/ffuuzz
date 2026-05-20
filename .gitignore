@@ -37,6 +37,11 @@ web/node_modules/
 # Build output
 /ffuuzz
 
+# TLS certificates — keep only CA keypair, ignore all per-target certs
+certs/*
+!certs/ca.key
+!certs/ca.pem
+
 # Project artifacts
 log.jsonl
 artifacts/
@@ -48,3 +53,4 @@ artifacts/
 .agents/
 skills-lock.json
 .DS_Store
+

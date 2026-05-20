@@ -21,8 +21,9 @@ var builtinHeaderDict = map[string][]string{
 
 // HeaderMutator applies mutations to HTTP request headers.
 type HeaderMutator struct {
-	MaxHdrLen int
-	UserDict  *Dictionary
+	MaxHdrLen   int
+	UserDict    *Dictionary
+	EnabledOps  []string // nil or empty = all enabled
 }
 
 func (m *HeaderMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
@@ -30,27 +31,25 @@ func (m *HeaderMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity floa
 		ex.Request.Headers = make(map[string][]string)
 	}
 
-	op := rng.Intn(6)
-	var opName string
+	ops := resolveOps(m.EnabledOps, allHeaderOps)
+	if len(ops) == 0 {
+		return MutationResult{Exchange: ex, Operators: []string{"header:noop"}}
+	}
 
-	switch op {
-	case 0:
-		opName = "header:add"
+	opName := "header:" + ops[rng.Intn(len(ops))]
+
+	switch opName {
+	case "header:add":
 		ex = m.addHeader(ex, rng)
-	case 1:
-		opName = "header:remove"
+	case "header:remove":
 		ex = m.removeHeader(ex, rng)
-	case 2:
-		opName = "header:duplicate"
+	case "header:duplicate":
 		ex = m.duplicateHeader(ex, rng)
-	case 3:
-		opName = "header:long_value"
+	case "header:long_value":
 		ex = m.longValue(ex, rng)
-	case 4:
-		opName = "header:dict_substitute"
+	case "header:dict_substitute":
 		ex = m.dictSubstitute(ex, rng)
-	case 5:
-		opName = "header:conflicting"
+	case "header:conflicting":
 		ex = m.conflicting(ex, rng)
 	}
 

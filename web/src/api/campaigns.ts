@@ -3,6 +3,7 @@ import type {
     CampaignConfig,
     CampaignStats,
     CreateCampaignRequest,
+    UpdateCampaignRequest,
     Finding,
     AddRecordingsResponse,
 } from "@/types/api";
@@ -70,4 +71,32 @@ export function addRecordingsToCampaign(
         `${API_BASE}/campaigns/${campaignId}/recordings`,
         filter,
     );
+}
+
+export interface AnalyzeCampaignResponse {
+    analyzed: number;
+    message: string;
+    total?: number;
+}
+
+export function analyzeCampaign(
+    id: string,
+): Promise<AnalyzeCampaignResponse> {
+    return post<AnalyzeCampaignResponse>(
+        `${API_BASE}/campaigns/${id}/analyze`,
+    );
+}
+
+export function quickCreateCampaign(req: {
+    name: string;
+    filter: { scheme: string; host: string; port: number; path_prefix?: string };
+}): Promise<Campaign> {
+    return post<Campaign>(`${API_BASE}/campaigns/quick`, req);
+}
+
+export function updateCampaign(
+    id: string,
+    req: UpdateCampaignRequest,
+): Promise<Campaign> {
+    return post<Campaign>(`${API_BASE}/campaigns/${id}`, req);
 }

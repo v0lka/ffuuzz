@@ -15,6 +15,7 @@ import (
 // when the body is not valid JSON.
 type JSONMutator struct {
 	MaxBodyLen int
+	EnabledOps []string // nil or empty = all enabled
 }
 
 func (m *JSONMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
@@ -45,27 +46,25 @@ func (m *JSONMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float6
 		return p.Mutate(ex, rng, intensity)
 	}
 
-	op := rng.Intn(6)
-	var opName string
+	ops := resolveOps(m.EnabledOps, allJSONOps)
+	if len(ops) == 0 {
+		return MutationResult{Exchange: ex, Operators: []string{"json:noop"}}
+	}
 
-	switch op {
-	case 0:
-		opName = "json:type_substitute"
+	opName := "json:" + ops[rng.Intn(len(ops))]
+
+	switch opName {
+	case "json:type_substitute":
 		data = m.typeSubstitute(data, rng)
-	case 1:
-		opName = "json:object_key"
+	case "json:object_key":
 		data = m.objectKeyMutation(data, rng)
-	case 2:
-		opName = "json:array_mutation"
+	case "json:array_mutation":
 		data = m.arrayMutation(data, rng)
-	case 3:
-		opName = "json:boundary_values"
+	case "json:boundary_values":
 		data = m.boundaryValues(data, rng)
-	case 4:
-		opName = "json:depth_stress"
+	case "json:depth_stress":
 		data = m.depthStress(data, rng)
-	case 5:
-		opName = "json:string_mutation"
+	case "json:string_mutation":
 		data = m.stringMutation(data, rng)
 	}
 

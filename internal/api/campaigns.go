@@ -236,7 +236,12 @@ func (s *Server) buildCampaignStats(ctx context.Context, id string) (*model.Camp
 	}
 
 	if campaign.StartedAt != nil && campaign.TestsDone > 0 {
-		elapsed := time.Since(*campaign.StartedAt).Seconds()
+		var elapsed float64
+		if campaign.FinishedAt != nil {
+			elapsed = campaign.FinishedAt.Sub(*campaign.StartedAt).Seconds()
+		} else {
+			elapsed = time.Since(*campaign.StartedAt).Seconds()
+		}
 		if elapsed > 0 {
 			stats.TestsPerSec = float64(campaign.TestsDone) / elapsed
 		}
@@ -391,4 +396,179 @@ func (s *Server) addRecordingsToCampaign(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"added": added})
+}
+
+type editCampaignRequest struct {
+	Name         *string               `json:"name"`
+	RecordingIDs *[]string             `json:"recording_ids"`
+	Config       *model.CampaignConfig `json:"config"`
+}
+
+func (s *Server) editCampaign(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id")
+	if !ok {
+		return
+	}
+
+	var req editCampaignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "INVALID_BODY", err.Error())
+		return
+	}
+
+	if req.Name == nil && req.RecordingIDs == nil && req.Config == nil {
+		errorResponse(c, http.StatusBadRequest, "INVALID_BODY", "at least one field (name, recording_ids, or config) is required")
+		return
+	}
+
+	campaign, err := s.campaigns.GetByID(c.Request.Context(), id)
+	if err != nil {
+		s.internalError(c, "GET_FAILED", err)
+		return
+	}
+	if campaign == nil {
+		errorResponse(c, http.StatusNotFound, "NOT_FOUND", "campaign not found")
+		return
+	}
+
+	switch campaign.Status {
+	case model.CampaignRunning, model.CampaignStarting, model.CampaignStopping:
+		errorResponse(c, http.StatusConflict, "INVALID_STATE", "cannot edit campaign in state: "+string(campaign.Status))
+		return
+	case model.CampaignCreated, model.CampaignStopped, model.CampaignFinished, model.CampaignFailed:
+		// valid, can edit
+	default:
+		errorResponse(c, http.StatusUnprocessableEntity, "INVALID_STATE", "cannot edit campaign in state: "+string(campaign.Status))
+		return
+	}
+
+	if req.Name != nil {
+		if !validateStringLen(*req.Name, 255) {
+			errorResponse(c, http.StatusBadRequest, "NAME_TOO_LONG", "name must not exceed 255 characters")
+			return
+		}
+		campaign.Name = *req.Name
+	}
+
+	if req.RecordingIDs != nil {
+		var firstSession *model.RecordingSession
+		for _, rid := range *req.RecordingIDs {
+			sess, err := s.recordings.GetByID(c.Request.Context(), rid, false, 0)
+			if err != nil {
+				s.internalError(c, "CHECK_FAILED", err)
+				return
+			}
+			if sess == nil {
+				errorResponse(c, http.StatusNotFound, "RECORDING_NOT_FOUND", "recording not found: "+rid)
+				return
+			}
+			if firstSession == nil {
+				firstSession = sess
+			}
+		}
+		campaign.RecordingIDs = *req.RecordingIDs
+	}
+
+	if req.Config != nil {
+		if err := validateCampaignConfig(*req.Config); err != nil {
+			errorResponse(c, http.StatusUnprocessableEntity, "INVALID_CONFIG", err.Error())
+			return
+		}
+		campaign.Config = *req.Config
+	}
+
+	campaign.UpdatedAt = time.Now().UTC()
+
+	if err := s.campaigns.Update(c.Request.Context(), *campaign); err != nil {
+		s.internalError(c, "UPDATE_FAILED", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, campaign)
+}
+
+type quickCreateCampaignRequest struct {
+	Name   string              `json:"name" binding:"required"`
+	Filter addRecordingsRequest `json:"filter" binding:"required"`
+}
+
+func (s *Server) quickCreateCampaign(c *gin.Context) {
+	var req quickCreateCampaignRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errorResponse(c, http.StatusBadRequest, "INVALID_BODY", err.Error())
+		return
+	}
+
+	if !validateStringLen(req.Name, 255) {
+		errorResponse(c, http.StatusBadRequest, "NAME_TOO_LONG", "name must not exceed 255 characters")
+		return
+	}
+	if !validateScheme(req.Filter.Scheme) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_SCHEME", "scheme must be http or https")
+		return
+	}
+	if !validatePort(req.Filter.Port) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_PORT", "port must be between 1 and 65535")
+		return
+	}
+	if !validateStringLen(req.Filter.Host, 253) {
+		errorResponse(c, http.StatusBadRequest, "INVALID_HOST", "host must not exceed 253 characters")
+		return
+	}
+
+	now := time.Now().UTC()
+	campaign := model.Campaign{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Status:    model.CampaignCreated,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Config: model.CampaignConfig{
+			Target: model.TargetURL{
+				BaseURL: fmt.Sprintf("%s://%s:%d", req.Filter.Scheme, req.Filter.Host, req.Filter.Port),
+			},
+			Limits: model.CampaignLimits{
+				Workers:      8,
+				RPS:          50,
+				MaxTests:     10000,
+				ReqTimeoutMs: 3000,
+			},
+			Mutations: model.MutationConfig{
+				PathQuery: true,
+				Headers:   true,
+				JSONBody:  true,
+				Params:    true,
+				Intensity: 0.6,
+			},
+			Anomaly: model.AnomalyConfig{
+				Detect5xx:         true,
+				LatencyMultiplier: 3.0,
+			},
+			Triage: model.TriageConfig{
+				ConfirmRuns:        3,
+				EnableMinimization: true,
+			},
+		},
+	}
+
+	added, err := s.campaigns.CreateWithFilter(
+		c.Request.Context(),
+		campaign,
+		req.Filter.Scheme,
+		req.Filter.Host,
+		req.Filter.Port,
+		escapeLikePattern(req.Filter.PathPrefix),
+	)
+	if err != nil {
+		if err.Error() == "no recordings match the filter" {
+			errorResponse(c, http.StatusBadRequest, "NO_RECORDINGS", "no recordings match the specified filter")
+			return
+		}
+		s.internalError(c, "CREATE_FAILED", err)
+		return
+	}
+
+	campaign.RecordingIDs = make([]string, 0, added)
+	campaign.Progress = &model.CampaignProgress{}
+	c.JSON(http.StatusCreated, campaign)
 }

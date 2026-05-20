@@ -26,7 +26,9 @@ var interestingValues = [][]byte{
 }
 
 // PrimitiveMutator applies byte-level mutation primitives to exchange bodies.
-type PrimitiveMutator struct{}
+type PrimitiveMutator struct {
+	EnabledOps []string // nil or empty = all enabled
+}
 
 func (m *PrimitiveMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
 	body, err := base64.StdEncoding.DecodeString(ex.Request.BodyB64)
@@ -37,30 +39,27 @@ func (m *PrimitiveMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity f
 	mutated := make([]byte, len(body))
 	copy(mutated, body)
 
-	// Pick a random primitive based on RNG
-	op := rng.Intn(6)
-	var opName string
+	ops := resolveOps(m.EnabledOps, allPrimitiveOps)
+	if len(ops) == 0 {
+		return MutationResult{Exchange: ex, Operators: []string{"primitive:noop"}}
+	}
 
-	switch op {
-	case 0:
-		opName = "bitflip"
+	opName := "primitive:" + ops[rng.Intn(len(ops))]
+
+	switch opName {
+	case "primitive:bitflip":
 		mutated = BitFlip(mutated, rng.Intn(len(mutated)*8))
-	case 1:
-		opName = "byteflip"
+	case "primitive:byteflip":
 		mutated = ByteFlip(mutated, rng.Intn(len(mutated)))
-	case 2:
-		opName = "arith"
+	case "primitive:arith":
 		pos := rng.Intn(len(mutated))
 		delta := rng.Intn(35) - 17 // range [-17, 17]
 		mutated = ArithmeticAdd(mutated, pos, delta)
-	case 3:
-		opName = "interesting"
+	case "primitive:interesting":
 		mutated = InterestingReplace(mutated, rng)
-	case 4:
-		opName = "block_op"
+	case "primitive:block_op":
 		mutated = BlockOperation(mutated, rng)
-	case 5:
-		opName = "splice"
+	case "primitive:splice":
 		// Splice with the response body as a second source
 		other, err := base64.StdEncoding.DecodeString(ex.Response.BodyB64)
 		if err != nil {
@@ -69,13 +68,12 @@ func (m *PrimitiveMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity f
 		if len(other) > 0 {
 			mutated = Splice(mutated, other, rng)
 		} else {
-			opName = "bitflip"
 			mutated = BitFlip(mutated, rng.Intn(len(mutated)*8))
 		}
 	}
 
 	ex.Request.BodyB64 = base64.StdEncoding.EncodeToString(mutated)
-	return MutationResult{Exchange: ex, Operators: []string{"primitive:" + opName}}
+	return MutationResult{Exchange: ex, Operators: []string{opName}}
 }
 
 // BitFlip inverts a single bit at the given bit position.

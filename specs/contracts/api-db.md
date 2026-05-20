@@ -26,8 +26,10 @@ type RecordingStore interface {
 type CampaignStore interface {
     GetByID(ctx context.Context, id string) (*model.Campaign, error)
     Create(ctx context.Context, c model.Campaign) error
+    CreateWithFilter(ctx context.Context, c model.Campaign, scheme, host string, port int, pathPrefix string) (int, error)
     List(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error)
     AddRecordingsByFilter(ctx context.Context, campaignID, scheme, host string, port int, pathPrefix string) (int, error)
+    Update(ctx context.Context, c model.Campaign) error
 }
 
 // FindingStore — finding queries
@@ -93,6 +95,15 @@ API Handler
     │
     ├── campaignStore.Create(ctx, campaign)
     │   └── SQL: INSERT INTO campaigns (id, name, status, config, ...)
+    │   └── Returns error
+    │
+    ├── campaignStore.CreateWithFilter(ctx, campaign, scheme, host, port, pathPrefix)
+    │   └── SQL: INSERT INTO campaigns ... + INSERT INTO campaign_recordings SELECT FROM recordings WHERE filter (in tx)
+    │   └── Returns count of linked recordings (error if zero, transaction rolls back)
+    │
+    ├── campaignStore.Update(ctx, campaign)
+    │   └── SQL: UPDATE campaigns SET name, updated_at, config WHERE id (in tx)
+    │   └── SQL: DELETE FROM campaign_recordings WHERE campaign_id + INSERT for each recording_id
     │   └── Returns error
     │
     ├── findingStore.ListAll(ctx, campaignID, typeFilter, statusFilter, since, limit, offset)

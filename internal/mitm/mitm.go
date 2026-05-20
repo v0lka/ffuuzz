@@ -2,12 +2,15 @@
 package mitm
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -125,6 +128,14 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	elapsed := time.Since(start)
 	metrics.RequestDuration.Observe(elapsed.Seconds())
 
+	// Build recorded response headers: clone and strip Content-Encoding when
+	// we can decompress the body, so stored exchanges contain plain text.
+	recordedRespHeaders := resp.Header.Clone()
+	isGzip := strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip")
+	if isGzip {
+		recordedRespHeaders.Del("Content-Encoding")
+	}
+
 	tx := &recorder.TxRecord{
 		RequestID:   reqID,
 		Time:        start,
@@ -132,7 +143,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		URL:         outReq.URL.String(),
 		ReqHeaders:  outReq.Header.Clone(),
 		RespStatus:  resp.StatusCode,
-		RespHeaders: resp.Header.Clone(),
+		RespHeaders: recordedRespHeaders,
 		ReqTrunc:    reqBuf.Truncated(),
 		RespTrunc:   respBuf.Truncated(),
 		Timings:     map[string]int64{"total_ms": elapsed.Milliseconds()},
@@ -142,7 +153,17 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		tx.ReqBody = recorder.EncodeBodyToBase64(rb)
 	}
 	if rb := respBuf.Bytes(); len(rb) > 0 {
-		tx.RespBody = recorder.EncodeBodyToBase64(rb)
+		recordBody := rb
+		if isGzip && !respBuf.Truncated() {
+			if decompressed, gunzipErr := gunzip(rb); gunzipErr == nil {
+				recordBody = decompressed
+			} else {
+				// Decompression failed; store raw bytes and keep the header.
+				p.logger.Warn().Err(gunzipErr).Str("request_id", reqID).Msg("gzip decompress failed; storing raw response body")
+				recordedRespHeaders.Set("Content-Encoding", "gzip")
+			}
+		}
+		tx.RespBody = recorder.EncodeBodyToBase64(recordBody)
 	}
 
 	if err := p.cfg.Recorder.Record(tx); err != nil {
@@ -267,4 +288,14 @@ func (p *Proxy) mitmHTTPS(clientConn net.Conn, host string, connectReqID string)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		p.logger.Debug().Err(err).Str("request_id", connectReqID).Str("host", host).Msg("mitm serve ended")
 	}
+}
+
+// gunzip decompresses a gzip-encoded byte slice and returns the plain bytes.
+func gunzip(b []byte) ([]byte, error) {
+	r, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }()
+	return io.ReadAll(r)
 }

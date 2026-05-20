@@ -186,9 +186,9 @@ FFUUZZ operates in two distinct phases — **record** and **fuzz** — connected
    - **Triages** findings: deduplicates by signature, assigns severity and OWASP category, confirms by re-sending N times, re-scores severity with actual reproducibility, minimizes the session and body (JSON/query-params/XML/multipart).
    - **Persists** findings and artifacts to PostgreSQL.
 4. **SSE Streaming** (`internal/api/` streams campaign stats (tests done, findings per type, last activity) to connected clients.
-5. **LLM Analysis (API-initiated)** — Two endpoints allow on-demand LLM analysis: `POST /api/v1/findings/:id/analyze` analyzes a single finding, and `POST /api/v1/campaigns/:id/analyze` batch-analyzes all unconfirmed findings in a campaign. Both return HTTP 503 when LLM is disabled.
+5. **LLM Analysis (API-initiated + UI-driven)** — Two endpoints allow on-demand LLM analysis: `POST /api/v1/findings/:id/analyze` analyzes a single finding synchronously (200 OK with LLMAnalysis), and `POST /api/v1/campaigns/:id/analyze` batch-analyzes all unconfirmed findings asynchronously (202 Accepted, background goroutine with 10-minute timeout). The React SPA provides UI buttons on the Finding Detail page ("Analyze with LLM" with inline loading spinner) and Campaign Detail page ("Batch LLM analyze" with a non-modal progress bar that polls findings every 2 seconds). Both return HTTP 503 when LLM is disabled.
 6. **Reproduce Worker** (`internal/engine/reproduce.go`) polls for enqueued reproduce jobs and replays the finding's artifact session against the target.
-6. **Vulnerability Grouping** — At campaign stop, confirmed findings are grouped by type/mutation/endpoint/status-range and assigned a shared `GroupID`. A background goroutine also groups periodically every 15s.
+7. **Vulnerability Grouping** — At campaign stop, confirmed findings are grouped by type/mutation/endpoint/status-range and assigned a shared `GroupID`. A background goroutine also groups periodically every 15s.
 
 ### Shutdown Phase
 

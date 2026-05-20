@@ -6,10 +6,10 @@ Provides concrete LLM provider implementations (OpenAI and Anthropic) for AI-ass
 
 ## Key Files
 
-| File | Role |
-|------|------|
-| `internal/llm/factory.go` | `NewProvider()` factory, `llmResponseJSON` shared types |
-| `internal/llm/openai.go` | `openAIProvider`: OpenAI implementation using `go-openai` SDK with structured JSON output |
+| File                        | Role                                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `internal/llm/factory.go`   | `NewProvider()` factory, `llmResponseJSON` shared types                                           |
+| `internal/llm/openai.go`    | `openAIProvider`: OpenAI implementation using `go-openai` SDK with structured JSON output         |
 | `internal/llm/anthropic.go` | `anthropicProvider`: Anthropic implementation using `anthropic-sdk-go` with regex JSON extraction |
 
 ## Core Types
@@ -43,13 +43,13 @@ type LLMProvider interface {
 
 Factory that dispatches based on `cfg.Provider`:
 
-| Condition | Return | Behavior |
-|-----------|--------|----------|
-| `cfg.Enabled == false` | `nil, nil` | Graceful degradation — LLM is disabled |
-| `cfg.APIKey == ""` | `nil, error` | Fatal: LLM enabled but no key configured |
-| `cfg.Provider == "openai"` | `*openAIProvider, nil` | OpenAI provider with `go-openai` SDK |
+| Condition                     | Return                    | Behavior                                   |
+| ----------------------------- | ------------------------- | ------------------------------------------ |
+| `cfg.Enabled == false`        | `nil, nil`                | Graceful degradation — LLM is disabled     |
+| `cfg.APIKey == ""`            | `nil, error`              | Fatal: LLM enabled but no key configured   |
+| `cfg.Provider == "openai"`    | `*openAIProvider, nil`    | OpenAI provider with `go-openai` SDK       |
 | `cfg.Provider == "anthropic"` | `*anthropicProvider, nil` | Anthropic provider with `anthropic-sdk-go` |
-| Other | `nil, error` | Unknown provider name |
+| Other                         | `nil, error`              | Unknown provider name                      |
 
 ## Providers
 
@@ -64,13 +64,15 @@ Uses the `go-openai` SDK (`github.com/sashabaranov/go-openai`).
 **Response format**: Uses `response_format: json_object` for `AnalyzeFinding` — the API guarantees valid JSON output. Parsed by `parseAnalysisJSON()`.
 
 **Temperature**:
-- `AnalyzeFinding`: 0.1 (deterministic)
-- `GenerateDescription`: 0.3
-- `GenerateReport`: 0.3
+
+- `AnalyzeFinding`: 0.01 (deterministic)
+- `GenerateDescription`: 0.1
+- `GenerateReport`: 0.1
 
 **Max tokens**: `cfg.MaxTokens` for `AnalyzeFinding` and `GenerateReport`, 256 for `GenerateDescription`.
 
 **Error handling**:
+
 - Chat completion failure → wrapped error: `"openai chat completion: <err>"`
 - Empty choices array → error: `"openai returned no choices"`
 - JSON parse failure → error: `"parse llm response: <err>"`
@@ -95,6 +97,7 @@ Uses the `anthropic-sdk-go` SDK (`github.com/anthropics/anthropic-sdk-go`).
 **Max tokens**: `int64(cfg.MaxTokens)` for `AnalyzeFinding` and `GenerateReport`, 256 for `GenerateDescription`.
 
 **Error handling**:
+
 - Messages API failure → wrapped error: `"anthropic messages: <err>"`
 - Empty content → error: `"anthropic returned no content"`
 - No JSON found in response → error: `"no JSON object found in anthropic response"`
@@ -109,10 +112,10 @@ Uses the `anthropic-sdk-go` SDK (`github.com/anthropics/anthropic-sdk-go`).
 
 Both providers produce the same `llmResponseJSON` struct, but parsing differs:
 
-| Provider | Parsing method | JSON extraction |
-|----------|---------------|-----------------|
-| OpenAI | `parseAnalysisJSON` | Direct `json.Unmarshal` of response content |
-| Anthropic | `parseAnthropicJSON` | Regex `\{[\s\S]*\}` then `json.Unmarshal` |
+| Provider  | Parsing method       | JSON extraction                             |
+| --------- | -------------------- | ------------------------------------------- |
+| OpenAI    | `parseAnalysisJSON`  | Direct `json.Unmarshal` of response content |
+| Anthropic | `parseAnthropicJSON` | Regex `\{[\s\S]*\}` then `json.Unmarshal`   |
 
 Both convert `llmResponseJSON` to `model.LLMAnalysis` with `AnalyzedAt` set to `time.Now().UTC()`.
 
@@ -138,13 +141,13 @@ The providers do not construct prompts themselves — they call these `triage` p
 
 ## Dependencies
 
-| Package | Used for |
-|---------|----------|
-| `internal/config` | `LLMConfig` for provider initialization |
-| `internal/model` | `LLMAnalysis`, `Severity` |
-| `internal/triage` | `LLMProvider` interface, `LLMAnalysisRequest`, `LLMDescriptionRequest`, `LLMReportInput`, prompt construction |
-| `github.com/sashabaranov/go-openai` | OpenAI chat completions API |
-| `github.com/anthropics/anthropic-sdk-go` | Anthropic Messages API |
+| Package                                  | Used for                                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `internal/config`                        | `LLMConfig` for provider initialization                                                                       |
+| `internal/model`                         | `LLMAnalysis`, `Severity`                                                                                     |
+| `internal/triage`                        | `LLMProvider` interface, `LLMAnalysisRequest`, `LLMDescriptionRequest`, `LLMReportInput`, prompt construction |
+| `github.com/sashabaranov/go-openai`      | OpenAI chat completions API                                                                                   |
+| `github.com/anthropics/anthropic-sdk-go` | Anthropic Messages API                                                                                        |
 
 ## Edge Cases
 

@@ -101,7 +101,7 @@ export default function DashboardPage() {
             <div>
                 <h2 className="text-lg font-semibold mb-3">Recent Findings</h2>
                 {recentFindings.data && recentFindings.data.length > 0 ? (
-                    <FindingsTable findings={recentFindings.data} />
+                    <FindingsTable findings={recentFindings.data} from="/" />
                 ) : (
                     <p className="text-sm opacity-60">No findings yet</p>
                 )}

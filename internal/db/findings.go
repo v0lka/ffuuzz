@@ -45,6 +45,8 @@ type findingRow struct {
 	ReproduceRuns       int            `db:"reproduce_runs"`
 	MutationType        sql.NullString `db:"mutation_type"`
 	MutationPayload     sql.NullString `db:"mutation_payload"`
+	MutationOps         pq.StringArray `db:"mutation_ops"`
+	RegexPatterns       pq.StringArray `db:"regex_patterns"`
 	Severity            string         `db:"severity"`
 	OWASPCategory       string         `db:"owasp_category"`
 	GroupID             sql.NullString `db:"group_id"`
@@ -84,6 +86,12 @@ func (r findingRow) toModel(logger zerolog.Logger) model.Finding {
 	}
 	if r.MutationPayload.Valid {
 		f.MutationPayload = r.MutationPayload.String
+	}
+	if len(r.MutationOps) > 0 {
+		f.MutationOps = []string(r.MutationOps)
+	}
+	if len(r.RegexPatterns) > 0 {
+		f.RegexPatterns = []string(r.RegexPatterns)
 	}
 	f.Severity = model.Severity(r.Severity)
 	f.OWASPCategory = model.OWASPCategory(r.OWASPCategory)
@@ -135,11 +143,20 @@ func (s *FindingStore) Create(ctx context.Context, f model.Finding) error {
 		mutationPayload = sql.NullString{String: f.MutationPayload, Valid: true}
 	}
 
+	var mutationOps, regexPatterns interface{}
+	if len(f.MutationOps) > 0 {
+		mutationOps = pq.StringArray(f.MutationOps)
+	}
+	if len(f.RegexPatterns) > 0 {
+		regexPatterns = pq.StringArray(f.RegexPatterns)
+	}
+
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload, severity, owasp_category, reproducibility, llm_analysis)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		INSERT INTO findings (id, campaign_id, type, status, signature, created_at, method, endpoint, details, seed_recording_id, minimized, mutation_type, mutation_payload, mutation_ops, regex_patterns, severity, owasp_category, reproducibility, llm_analysis)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
 		f.ID, f.CampaignID, string(f.Type), string(f.Status), f.Signature,
 		f.CreatedAt, f.Method, f.Endpoint, detailsJSON, seedRec, f.Minimized, mutationType, mutationPayload,
+		mutationOps, regexPatterns,
 		string(f.Severity), string(f.OWASPCategory), f.Reproducibility, llmAnalysisJSON,
 	)
 	if err != nil {
@@ -191,7 +208,7 @@ func (s *FindingStore) GetByID(ctx context.Context, id string) (*model.Finding, 
 		`SELECT id, campaign_id, type, status, signature, created_at, confirmed_at,
 			method, endpoint, details, seed_recording_id, minimized,
 			reproduce_status, reproduce_enqueued_at, reproduce_runs,
-			mutation_type, mutation_payload,
+			mutation_type, mutation_payload, mutation_ops, regex_patterns,
 			severity, owasp_category, group_id, reproducibility, llm_analysis
 		 FROM findings WHERE id = $1`, id)
 	if err != nil {
@@ -253,7 +270,7 @@ func (q *findingsQuery) build(limit, offset int) (string, []any) {
 	query := `SELECT f.id, f.campaign_id, f.type, f.status, f.signature, f.created_at, f.confirmed_at,
 		f.method, f.endpoint, f.details, f.seed_recording_id, f.minimized,
 		f.reproduce_status, f.reproduce_enqueued_at, f.reproduce_runs,
-		f.mutation_type, f.mutation_payload,
+		f.mutation_type, f.mutation_payload, f.mutation_ops, f.regex_patterns,
 		f.severity, f.owasp_category, f.group_id, f.reproducibility, f.llm_analysis
 		FROM findings f`
 	if len(q.conditions) > 0 {

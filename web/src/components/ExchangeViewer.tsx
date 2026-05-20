@@ -38,7 +38,12 @@ export function ExchangeViewer({ entries }: ExchangeViewerProps) {
                     <div className="collapse-title flex items-center gap-3 text-sm">
                         <span className="opacity-50 w-6">#{idx + 1}</span>
                         <MethodBadge method={ex.request.method} />
-                        <span className="font-mono">{ex.request.path}</span>
+                        <span className="font-mono">
+                            {ex.request.path}
+                            {ex.request.query && (
+                                <span className="opacity-70">?{ex.request.query}</span>
+                            )}
+                        </span>
                         <span
                             className={`badge badge-xs ${ex.response.status >= 400
                                 ? "badge-error"
@@ -54,7 +59,7 @@ export function ExchangeViewer({ entries }: ExchangeViewerProps) {
                     {expanded.has(idx) && (
                         <div className="collapse-content">
                             <div className="grid md:grid-cols-2 gap-4 pt-2">
-                                <div>
+                                <div className="min-w-0 overflow-hidden">
                                     <h4 className="text-xs font-bold mb-2">
                                         Request Headers
                                     </h4>
@@ -67,7 +72,7 @@ export function ExchangeViewer({ entries }: ExchangeViewerProps) {
                                         truncated={ex.request.body_truncated}
                                     />
                                 </div>
-                                <div>
+                                <div className="min-w-0 overflow-hidden">
                                     <h4 className="text-xs font-bold mb-2">
                                         Response Headers
                                     </h4>

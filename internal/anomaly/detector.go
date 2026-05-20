@@ -16,6 +16,12 @@ import (
 )
 
 // AnomalyHit represents a detected anomaly from a single exchange.
+//
+// Detector implementations populate Type, Method, Endpoint, Details, Exchange
+// and ResultBody. The worker enriches each hit after detection with
+// per-session context (HitExchangeIndex, OriginalRequest, OpsByExchange) so
+// the original request endpoint is preserved and so the artifact payload can
+// pinpoint which exchange triggered the finding.
 type AnomalyHit struct {
 	Type       model.FindingType
 	Method     string
@@ -23,6 +29,11 @@ type AnomalyHit struct {
 	Details    model.FindingDetails
 	Exchange   model.Exchange
 	ResultBody []byte
+
+	// Filled by the worker (not by detectors):
+	OriginalRequest  model.RequestData // pre-mutation request for diff-based payload
+	HitExchangeIndex int               // index of this hit's exchange in the session
+	OpsByExchange    [][]string        // operators applied per exchange across the session
 }
 
 // BaselineEntry holds per-endpoint baseline data.
@@ -144,21 +155,55 @@ func (d *RegexDetector) Detect(ex model.Exchange, result replayer.ExchangeResult
 	}
 
 	for _, re := range d.compiled {
-		if re.Match(result.RespBody) {
-			return []AnomalyHit{{
-				Type:     model.FindingRegexMatch,
-				Method:   ex.Request.Method,
-				Endpoint: ex.Request.Path,
-				Details: model.FindingDetails{
-					HTTPStatus: result.StatusCode,
-					ObservedMs: result.DurationMs,
-				},
-				Exchange:   ex,
-				ResultBody: result.RespBody,
-			}}
+		loc := re.FindIndex(result.RespBody)
+		if loc == nil {
+			continue
 		}
+		return []AnomalyHit{{
+			Type:     model.FindingRegexMatch,
+			Method:   ex.Request.Method,
+			Endpoint: ex.Request.Path,
+			Details: model.FindingDetails{
+				HTTPStatus:    result.StatusCode,
+				ObservedMs:    result.DurationMs,
+				RegexPattern:  re.String(),
+				MatchOffset:   loc[0],
+				MatchSnippet:  matchSnippet(result.RespBody, loc[0], loc[1]),
+				BodyTotalSize: len(result.RespBody),
+			},
+			Exchange:   ex,
+			ResultBody: result.RespBody,
+		}}
 	}
 	return nil
+}
+
+// matchSnippetWindow controls how many bytes around a regex match are stored
+// in FindingDetails.MatchSnippet so analysts can quickly see context without
+// reading the full artifact body.
+const matchSnippetWindow = 256
+
+// matchSnippet returns up to matchSnippetWindow bytes around the [start, end)
+// match location, truncating safely at the body boundaries.
+func matchSnippet(body []byte, start, end int) string {
+	if start < 0 || start > len(body) {
+		return ""
+	}
+	if end < start {
+		end = start
+	}
+	if end > len(body) {
+		end = len(body)
+	}
+	from := start - matchSnippetWindow/2
+	if from < 0 {
+		from = 0
+	}
+	to := end + matchSnippetWindow/2
+	if to > len(body) {
+		to = len(body)
+	}
+	return string(body[from:to])
 }
 
 // MultiDetector runs all enabled detectors and collects results.

@@ -54,12 +54,12 @@ make build
 
 The application will be available at:
 
-| Service   | Address                |
-|-----------|------------------------|
-| Proxy     | `http://localhost:8080` |
-| Web UI    | `http://localhost:8081` |
-| Health    | `http://localhost:8081/healthz` |
-| Metrics   | `http://localhost:8081/metrics` |
+| Service | Address                         |
+| ------- | ------------------------------- |
+| Proxy   | `http://localhost:8080`         |
+| Web UI  | `http://localhost:8081`         |
+| Health  | `http://localhost:8081/healthz` |
+| Metrics | `http://localhost:8081/metrics` |
 
 ## Configuration
 
@@ -87,46 +87,71 @@ FFUUZZ_DATABASE_URI=postgres://${DB_USER}:${DB_PASS}@localhost:5432/ffuuzz
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FFUUZZ_API_ADDRESS` | `:8081` | Control API listen address |
-| `FFUUZZ_PROXY_ADDRESS` | `:8080` | MITM proxy listen address |
-| `FFUUZZ_DATABASE_URI` | `postgres://ffuuzz:ffuuzz@localhost:5432/ffuuzz?sslmode=disable` | PostgreSQL connection URI |
-| `FFUUZZ_ARTIFACT_DIR` | `./artifacts` | Artifact storage directory |
-| `FFUUZZ_WORKERS` | `8` | Number of fuzzing workers |
-| `FFUUZZ_RPS` | `50` | Requests per second limit |
-| `FFUUZZ_REQ_TIMEOUT` | `3s` | Per-request timeout (Go duration) |
-| `FFUUZZ_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown timeout |
-| `FFUUZZ_MAX_BODY_BYTES` | `65536` | Max HTTP response body bytes to record |
-| `FFUUZZ_TLS_SKIP_VERIFY` | `true` | Skip TLS verification for upstream |
-| `FFUUZZ_TLS_MIN_VERSION` | `1.2` | Minimum TLS version (`1.2` or `1.3`) |
-| `FFUUZZ_TLS_HANDSHAKE_TIMEOUT` | `10s` | TLS handshake timeout (Go duration) |
-| `FFUUZZ_TLS_DISABLE_SESSION_TICKETS` | `false` | Disable TLS session tickets |
-| `FFUUZZ_CERT_CACHE_MAX_ENTRIES` | `1000` | Certificate LRU cache max entries |
-| `FFUUZZ_CERT_MEMORY_ONLY` | `false` | Keep certs in memory only (no disk) |
-| `FFUUZZ_CERT_CACHE_DIR` | `certs` | Certificate storage directory |
-| `FFUUZZ_LLM_ENABLED` | `false` | Enable LLM-assisted triage |
-| `FFUUZZ_LLM_PROVIDER` | (none) | LLM provider: `anthropic` or `openai` |
-| `FFUUZZ_LLM_API_KEY` | (none) | API key for the LLM provider |
-| `FFUUZZ_LLM_BASE_URL` | (none) | Custom LLM API base URL (for proxies/self-hosted) |
-| `FFUUZZ_LLM_MODEL` | (none) | LLM model name |
-| `FFUUZZ_LLM_MAX_TOKENS` | `4096` | Maximum tokens in LLM response |
-| `FFUUZZ_LLM_TIMEOUT` | `30s` | Timeout for each LLM API call |
+| Variable                             | Default                                                          | Description                                       |
+| ------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------- |
+| `FFUUZZ_API_ADDRESS`                 | `:8081`                                                          | Control API listen address                        |
+| `FFUUZZ_PROXY_ADDRESS`               | `:8080`                                                          | MITM proxy listen address                         |
+| `FFUUZZ_DATABASE_URI`                | `postgres://ffuuzz:ffuuzz@localhost:5432/ffuuzz?sslmode=disable` | PostgreSQL connection URI                         |
+| `FFUUZZ_ARTIFACT_DIR`                | `./artifacts`                                                    | Artifact storage directory                        |
+| `FFUUZZ_WORKERS`                     | `8`                                                              | Number of fuzzing workers                         |
+| `FFUUZZ_RPS`                         | `50`                                                             | Requests per second limit                         |
+| `FFUUZZ_REQ_TIMEOUT`                 | `3s`                                                             | Per-request timeout (Go duration)                 |
+| `FFUUZZ_SHUTDOWN_TIMEOUT`            | `30s`                                                            | Graceful shutdown timeout                         |
+| `FFUUZZ_MAX_BODY_BYTES`              | `65536`                                                          | Max HTTP response body bytes to record            |
+| `FFUUZZ_TLS_SKIP_VERIFY`             | `true`                                                           | Skip TLS verification for upstream                |
+| `FFUUZZ_TLS_MIN_VERSION`             | `1.2`                                                            | Minimum TLS version (`1.2` or `1.3`)              |
+| `FFUUZZ_TLS_HANDSHAKE_TIMEOUT`       | `10s`                                                            | TLS handshake timeout (Go duration)               |
+| `FFUUZZ_TLS_DISABLE_SESSION_TICKETS` | `false`                                                          | Disable TLS session tickets                       |
+| `FFUUZZ_CERT_CACHE_MAX_ENTRIES`      | `1000`                                                           | Certificate LRU cache max entries                 |
+| `FFUUZZ_CERT_MEMORY_ONLY`            | `false`                                                          | Keep certs in memory only (no disk)               |
+| `FFUUZZ_CERT_CACHE_DIR`              | `certs`                                                          | Certificate storage directory                     |
+| `FFUUZZ_LLM_ENABLED`                 | `false`                                                          | Enable LLM-assisted triage                        |
+| `FFUUZZ_LLM_PROVIDER`                | (none)                                                           | LLM provider: `anthropic` or `openai`             |
+| `FFUUZZ_LLM_API_KEY`                 | (none)                                                           | API key for the LLM provider                      |
+| `FFUUZZ_LLM_BASE_URL`                | (none)                                                           | Custom LLM API base URL (for proxies/self-hosted) |
+| `FFUUZZ_LLM_MODEL`                   | (none)                                                           | LLM model name                                    |
+| `FFUUZZ_LLM_MAX_TOKENS`              | `4096`                                                           | Maximum tokens in LLM response                    |
+| `FFUUZZ_LLM_TIMEOUT`                 | `30s`                                                            | Timeout for each LLM API call                     |
 
 ### CLI Flags (`serve` command)
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-a` | `:8081` | Control API listen address |
-| `-p` | `:8080` | MITM proxy listen address |
-| `-d` | (see env) | PostgreSQL connection URI |
-| `-o` | `./artifacts` | Artifact storage directory |
-| `-cert-dir` | `certs` | Certificate directory for CA and leaf certs |
-| `-max-body` | `65536` | Max body bytes to record |
-| `-cert-cache-size` | `1000` | Certificate LRU cache max entries |
-| `-cert-memory-only` | `false` | Keep certs in memory only (no disk) |
-| `-tls-no-tickets` | `false` | Disable TLS session tickets |
-| `-tls-skip-verify` | `true` | Skip TLS certificate verification for upstream |
+| Flag                | Default       | Description                                    |
+| ------------------- | ------------- | ---------------------------------------------- |
+| `-a`                | `:8081`       | Control API listen address                     |
+| `-p`                | `:8080`       | MITM proxy listen address                      |
+| `-d`                | (see env)     | PostgreSQL connection URI                      |
+| `-o`                | `./artifacts` | Artifact storage directory                     |
+| `-cert-dir`         | `certs`       | Certificate directory for CA and leaf certs    |
+| `-max-body`         | `65536`       | Max body bytes to record                       |
+| `-cert-cache-size`  | `1000`        | Certificate LRU cache max entries              |
+| `-cert-memory-only` | `false`       | Keep certs in memory only (no disk)            |
+| `-tls-no-tickets`   | `false`       | Disable TLS session tickets                    |
+| `-tls-skip-verify`  | `true`        | Skip TLS certificate verification for upstream |
+
+### Configuration Editor (Web UI)
+
+The Web UI provides a **Configuration** page (left sidebar) for editing the `.env` file directly from the browser. All `FFUUZZ_*` settings are displayed in a form grouped by category:
+
+| Category          | Fields                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| Server            | API address, proxy address, request timeout, shutdown timeout                              |
+| Database          | Database URI                                                                               |
+| Storage           | Artifact directory, max body bytes                                                         |
+| Performance       | Workers, RPS                                                                               |
+| TLS               | Skip verify, min version, handshake timeout, disable session tickets                       |
+| Certificate Cache | Max entries, memory only, cache directory                                                  |
+| LLM               | Enabled, provider, API key, base URL, model, max tokens, timeout                          |
+
+**Validation rules:**
+
+- Duration fields (`*_TIMEOUT`) require Go duration format (e.g., `30s`, `1m`)
+- Numeric fields (`WORKERS`, `RPS`, `MAX_BODY_BYTES`, etc.) must be positive integers
+- `TLS_MIN_VERSION` accepts `1.2` or `1.3`
+- `LLM_PROVIDER` accepts `anthropic` or `openai`
+
+Fields are validated on blur -- invalid values show a red border with an error message below the field. The API key field is masked; leave it blank to keep the current key, or enter a new value to replace it.
+
+**Save behavior:** clicking **Save** writes all changed values to the `.env` file. Values matching built-in defaults are written as commented lines; non-default values are written as active lines. Comments, section headers, and `${VAR}` expansion syntax in the `.env` file are preserved. Changes take effect on the next server restart -- the running service is not affected.
 
 ## Commands
 
@@ -148,12 +173,12 @@ Run the MITM proxy in standalone development mode. Traffic is recorded to a JSON
 ffuuzz proxy -port 8080 -out log.jsonl
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-port` | `8080` | Port to listen on |
-| `-out` | `log.jsonl` | JSONL output file |
-| `-cert-dir` | `certs` | Certificate directory |
-| `-maxbodykb` | `64` | Max body KB to record |
+| Flag         | Default     | Description           |
+| ------------ | ----------- | --------------------- |
+| `-port`      | `8080`      | Port to listen on     |
+| `-out`       | `log.jsonl` | JSONL output file     |
+| `-cert-dir`  | `certs`     | Certificate directory |
+| `-maxbodykb` | `64`        | Max body KB to record |
 
 ### `ffuuzz record`
 
@@ -163,8 +188,8 @@ Analyze a previously recorded JSONL log file and print a JSON summary to stdout.
 ffuuzz record -in log.jsonl
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
+| Flag  | Default     | Description      |
+| ----- | ----------- | ---------------- |
 | `-in` | `log.jsonl` | JSONL input file |
 
 ## Usage Workflow
@@ -228,27 +253,43 @@ curl -X POST http://localhost:8081/api/v1/campaigns \
 
 **Campaign configuration fields:**
 
-| Section | Field | Description |
-|---------|-------|-------------|
-| `target` | `base_url` | Base URL of the target application. Auto-derived from the first recording if omitted. |
-| `limits` | `workers` | Number of concurrent fuzzing workers (must be > 0) |
-| `limits` | `rps` | Maximum requests per second (must be > 0) |
-| `limits` | `max_tests` | Maximum number of test cases to run |
-| `limits` | `duration_sec` | Maximum campaign duration in seconds |
-| `limits` | `req_timeout_ms` | Per-request timeout in milliseconds (must be > 0) |
-| `mutations` | `path_query` | Enable path/query string mutations |
-| `mutations` | `headers` | Enable header mutations |
-| `mutations` | `json_body` | Enable JSON body mutations |
-| `mutations` | `params` | Enable parameter mutations |
-| `mutations` | `sequence` | Enable multi-exchange sequence mutations |
-| `mutations` | `intensity` | Mutation intensity from 0.0 (minimal) to 1.0 (aggressive) |
-| `anomaly` | `detect_5xx` | Detect HTTP 5xx server errors |
-| `anomaly` | `latency_multiplier` | Flag responses slower than baseline * multiplier |
-| `anomaly` | `regex_patterns` | Regex patterns to match against response bodies |
-| `triage` | `confirm_runs` | Number of re-runs to confirm a finding |
-| `triage` | `enable_minimization` | Attempt to minimize mutation payload |
+| Section     | Field                 | Description                                                                           |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------- |
+| `target`    | `base_url`            | Base URL of the target application. Auto-derived from the first recording if omitted. |
+| `limits`    | `workers`             | Number of concurrent fuzzing workers (must be > 0)                                    |
+| `limits`    | `rps`                 | Maximum requests per second (must be > 0)                                             |
+| `limits`    | `max_tests`           | Maximum number of test cases to run                                                   |
+| `limits`    | `duration_sec`        | Maximum campaign duration in seconds                                                  |
+| `limits`    | `req_timeout_ms`      | Per-request timeout in milliseconds (must be > 0)                                     |
+| `mutations` | `path_query`          | Enable path/query string mutations                                                    |
+| `mutations` | `headers`             | Enable header mutations                                                               |
+| `mutations` | `json_body`           | Enable JSON body mutations                                                            |
+| `mutations` | `params`              | Enable parameter mutations                                                            |
+| `mutations` | `sequence`            | Enable multi-exchange sequence mutations                                              |
+| `mutations` | `intensity`           | Mutation intensity from 0.0 (minimal) to 1.0 (aggressive)                             |
+| `anomaly`   | `detect_5xx`          | Detect HTTP 5xx server errors                                                         |
+| `anomaly`   | `latency_multiplier`  | Flag responses slower than baseline \* multiplier                                     |
+| `anomaly`   | `regex_patterns`      | Regex patterns to match against response bodies                                       |
+| `triage`    | `confirm_runs`        | Number of re-runs to confirm a finding                                                |
+| `triage`    | `enable_minimization` | Attempt to minimize mutation payload                                                  |
 
 At least one of `limits.duration_sec` or `limits.max_tests` must be greater than 0.
+
+**Editing a campaign:**
+
+Campaigns in `CREATED`, `STOPPED`, `FINISHED`, or `FAILED` state can be edited via the Web UI (click **Edit** on the campaign detail page) or the REST API:
+
+```bash
+curl -X POST http://localhost:8081/api/v1/campaigns/<id> \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Updated Campaign Name",
+    "recording_ids": ["<recording-id>"],
+    "config": { "limits": { "workers": 4, "rps": 20, "max_tests": 5000, "duration_sec": 0, "req_timeout_ms": 5000 } }
+  }'
+```
+
+All fields (`name`, `recording_ids`, `config`) are optional — only the fields you provide are updated. Active campaigns (`RUNNING`, `STARTING`, `STOPPING`) cannot be edited.
 
 ### 3. Start the Campaign
 
@@ -257,6 +298,7 @@ curl -X POST http://localhost:8081/api/v1/campaigns/<id>/start
 ```
 
 The engine will:
+
 - Load recording sessions as seeds
 - Replay each exchange with mutations applied
 - Detect anomalies based on the configured rules
@@ -318,7 +360,9 @@ curl -X POST http://localhost:8081/api/v1/findings/<finding-id>/reproduce \
 FFUZZ applies the following mutation strategies to recorded HTTP exchanges:
 
 ### Path/Query Mutations
+
 Inject security payloads into URL paths and query strings:
+
 - SQL injection (`' OR '1'='1`)
 - Path traversal (`../../../etc/passwd`)
 - Command injection
@@ -326,33 +370,43 @@ Inject security payloads into URL paths and query strings:
 - Log4Shell (`${jndi:ldap://...}`)
 
 ### Header Mutations
+
 Mutate HTTP headers:
+
 - `Content-Type` confusion
 - `Authorization` tampering
 - Custom header injection
 - CRLF injection (`\r\nX-Injected: true`)
 
 ### JSON Body Mutations
+
 Apply mutations to JSON request bodies:
+
 - Type confusion (string to number, null, boolean)
 - Boundary values (empty strings, extremely long strings)
 - Format string injections
 - Unicode edge cases (`\u0000`, `\uFFFD`)
 
 ### Parameter Mutations
+
 Mutate URL query parameters:
+
 - Value replacement with fuzz strings
 - Parameter pollution
 - Type confusion
 
 ### Sequence Mutations
+
 Mutate multi-exchange sequences:
+
 - Request reordering
 - Request duplication
 - Request omission
 
 ### Primitive Mutations
+
 Low-level byte mutations:
+
 - Bit flips
 - Truncation
 - Boundary values
@@ -363,12 +417,12 @@ Low-level byte mutations:
 
 Findings are categorized into the following types:
 
-| Type | Description |
-|------|-------------|
-| `TIMEOUT` | Request exceeded the configured timeout (`req_timeout_ms`) |
-| `SERVER_ERROR` | HTTP 5xx response received from the target |
+| Type                 | Description                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `TIMEOUT`            | Request exceeded the configured timeout (`req_timeout_ms`)                                |
+| `SERVER_ERROR`       | HTTP 5xx response received from the target                                                |
 | `LATENCY_REGRESSION` | Response time significantly higher than the baseline (controlled by `latency_multiplier`) |
-| `REGEX_MATCH` | Response body matches one of the configured `regex_patterns` |
+| `REGEX_MATCH`        | Response body matches one of the configured `regex_patterns`                              |
 
 ### Finding Lifecycle
 
@@ -380,6 +434,7 @@ Findings are categorized into the following types:
 ### Finding Details
 
 Each finding includes:
+
 - The HTTP method and endpoint
 - Mutation type and payload used
 - Baseline vs. observed latency (for latency regressions)
@@ -401,50 +456,98 @@ All endpoints return JSON. Errors follow the format:
 }
 ```
 
+### Configuration
+
+| Method | Path             | Description                                                    |
+| ------ | ---------------- | -------------------------------------------------------------- |
+| GET    | `/api/v1/config` | Get current configuration (API key is masked)                  |
+| PUT    | `/api/v1/config` | Update configuration values in the `.env` file (restart required) |
+
+**GET response:** Returns a JSON object with `server`, `database`, `storage`, `performance`, `tls`, `cert_cache`, and `llm` sections. Each field includes the current value (or the built-in default if not set in `.env`). The `llm.api_key` field is returned as a masked sentinel (`"••••••••"`) when a key is set.
+
+**PUT request body:** Same structure as the GET response. Only fields present in the request body are updated. Omit the `llm.api_key` field or leave it empty to keep the current key unchanged. Sending the masked sentinel value is ignored by the server.
+
+**PUT validation errors** return HTTP 422 with:
+
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Invalid configuration",
+  "fields": [
+    {"field": "server.req_timeout", "message": "invalid Go duration format"}
+  ]
+}
+```
+
 ### Health & Metrics
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/healthz` | Health check (returns DB status, version) |
-| GET | `/metrics` | Prometheus metrics |
+| Method | Path       | Description                               |
+| ------ | ---------- | ----------------------------------------- |
+| GET    | `/healthz` | Health check (returns DB status, version) |
+| GET    | `/metrics` | Prometheus metrics                        |
 
 ### Recordings
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/recordings/import` | Import recording sessions (JSON body) |
-| GET | `/api/v1/recordings` | List recordings. Query: `limit`, `offset`, `host`, `path_prefix` |
-| GET | `/api/v1/recordings/tree` | Get recordings as a hierarchical tree by origin/path |
-| GET | `/api/v1/recordings/export` | Export all recordings as JSON download. Query: `host`, `path_prefix` |
-| GET | `/api/v1/recordings/:id` | Get a single recording. Query: `include_entries=true`, `max_body_bytes` |
-| DELETE | `/api/v1/recordings/:id` | Delete a recording (fails if used by an active campaign) |
-| DELETE | `/api/v1/recordings/by-prefix` | Bulk delete by origin. Query: `scheme`, `host`, `port`, `path_prefix` |
+| Method | Path                           | Description                                                             |
+| ------ | ------------------------------ | ----------------------------------------------------------------------- |
+| POST   | `/api/v1/recordings/import`    | Import recording sessions (JSON body)                                   |
+| GET    | `/api/v1/recordings`           | List recordings. Query: `limit`, `offset`, `host`, `path_prefix`        |
+| GET    | `/api/v1/recordings/tree`      | Get recordings as a hierarchical tree by origin/path                    |
+| GET    | `/api/v1/recordings/export`    | Export all recordings as JSON download. Query: `host`, `path_prefix`    |
+| GET    | `/api/v1/recordings/:id`       | Get a single recording. Query: `include_entries=true`, `max_body_bytes` |
+| DELETE | `/api/v1/recordings/:id`       | Delete a recording (fails if used by an active campaign)                |
+| DELETE | `/api/v1/recordings/by-prefix` | Bulk delete by origin. Query: `scheme`, `host`, `port`, `path_prefix`   |
 
 ### Campaigns
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/campaigns` | Create a new campaign |
-| GET | `/api/v1/campaigns` | List campaigns. Query: `status`, `limit`, `offset` |
-| GET | `/api/v1/campaigns/:id` | Get campaign details |
-| GET | `/api/v1/campaigns/:id/stats` | Get aggregated campaign statistics |
-| GET | `/api/v1/campaigns/:id/config` | Get campaign configuration |
-| GET | `/api/v1/campaigns/:id/findings` | List findings for a campaign. Query: `type`, `status`, `since`, `limit`, `offset` |
-| GET | `/api/v1/campaigns/:id/stream` | SSE stream of real-time campaign statistics |
-| POST | `/api/v1/campaigns/:id/start` | Start a campaign |
-| POST | `/api/v1/campaigns/:id/stop` | Stop a running campaign |
-| POST | `/api/v1/campaigns/:id/recordings` | Add recordings to a campaign by filter |
+| Method | Path                               | Description                                                                       |
+| ------ | ---------------------------------- | --------------------------------------------------------------------------------- |
+| POST   | `/api/v1/campaigns`                | Create a new campaign                                                             |
+| GET    | `/api/v1/campaigns`                | List campaigns. Query: `status`, `limit`, `offset`                                |
+| GET    | `/api/v1/campaigns/:id`            | Get campaign details                                                              |
+| GET    | `/api/v1/campaigns/:id/stats`      | Get aggregated campaign statistics                                                |
+| GET    | `/api/v1/campaigns/:id/config`     | Get campaign configuration                                                        |
+| GET    | `/api/v1/campaigns/:id/findings`   | List findings for a campaign. Query: `type`, `status`, `since`, `limit`, `offset` |
+| GET    | `/api/v1/campaigns/:id/stream`     | SSE stream of real-time campaign statistics                                       |
+| POST   | `/api/v1/campaigns/:id/start`      | Start a campaign                                                                  |
+| POST   | `/api/v1/campaigns/:id/stop`       | Stop a running campaign                                                           |
+| POST   | `/api/v1/campaigns/:id/recordings` | Add recordings to a campaign by filter                                            |
+| POST   | `/api/v1/campaigns/:id`            | Update campaign name, recordings, or config                                       |
+| POST   | `/api/v1/campaigns/:id/analyze`    | Batch LLM-analyze all unconfirmed findings (async, 202 Accepted)                  |
 
 **Campaign statuses:** `CREATED`, `STARTING`, `RUNNING`, `STOPPING`, `STOPPED`, `FINISHED`, `FAILED`
 
 ### Findings
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/findings` | List all findings. Query: `campaign_id`, `type`, `status`, `since`, `limit`, `offset` |
-| GET | `/api/v1/findings/:id` | Get a single finding |
-| GET | `/api/v1/findings/:id/artifact` | Download finding reproduction artifact (JSON) |
-| POST | `/api/v1/findings/:id/reproduce` | Enqueue finding for reproduction. Body: `{"runs": N}` (1-20, default 3) |
+| Method | Path                             | Description                                                                           |
+| ------ | -------------------------------- | ------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/findings`               | List all findings. Query: `campaign_id`, `type`, `status`, `since`, `limit`, `offset` |
+| GET    | `/api/v1/findings/:id`           | Get a single finding                                                                  |
+| GET    | `/api/v1/findings/:id/artifact`  | Download finding reproduction artifact (JSON)                                         |
+| POST   | `/api/v1/findings/:id/reproduce` | Enqueue finding for reproduction. Body: `{"runs": N}` (1-20, default 3)               |
+| POST   | `/api/v1/findings/:id/analyze`   | Run LLM analysis on a single finding (synchronous, returns LLMAnalysis JSON)          |
+
+### LLM-Assisted Triage
+
+When LLM is configured (`FFUUZZ_LLM_ENABLED=true` + provider settings), findings can be analyzed by an LLM for automated classification, severity assessment, exploitability analysis, and remediation recommendations.
+
+**Single finding analysis:**
+
+```bash
+curl -X POST http://localhost:8081/api/v1/findings/<finding-id>/analyze
+```
+
+Returns an `LLMAnalysis` object with `classification`, `severity`, `confidence`, `exploitability`, `remediation`, `description`, and `analyzed_at`.
+
+**Campaign batch analysis:**
+
+```bash
+curl -X POST http://localhost:8081/api/v1/campaigns/<campaign-id>/analyze
+```
+
+Returns 202 Accepted immediately and processes all unconfirmed findings in a background goroutine (10-minute timeout). Results are persisted to each finding's `llm_analysis` field. Track progress by polling `GET /api/v1/campaigns/:id/findings?status=UNCONFIRMED` and counting findings with `llm_analysis` set.
+
+In the Web UI, use the **Analyze with LLM** button on finding detail pages and **Batch LLM analyze** on campaign detail pages (with a non-modal progress bar).
 
 ### Pagination
 
@@ -467,6 +570,8 @@ The web UI is available at `http://localhost:8081/ui/`. It provides:
 - **Findings browser** -- Filter and inspect findings by type and status
 - **Real-time stats** -- Live campaign progress via SSE
 - **Artifact viewer** -- Inspect full request/response payloads for reproduction
+- **LLM-assisted triage** -- On-demand single-finding and batch LLM analysis with progress tracking via the UI
+- **Configuration editor** -- Edit `.env` file settings from the browser with inline validation (changes take effect on restart)
 
 ## Testing Target (GoVWA)
 
@@ -484,18 +589,18 @@ docker-compose up -d --build
 
 This starts:
 
-| Service | Port |
-|---------|------|
-| PostgreSQL | `5432` |
-| GoVWA | `8888` |
+| Service     | Port   |
+| ----------- | ------ |
+| PostgreSQL  | `5432` |
+| GoVWA       | `8888` |
 | GoVWA MySQL | `3307` |
 
 ### GoVWA Credentials
 
-| Username | Password |
-|----------|----------|
-| admin | govwaadmin |
-| user1 | govwauser1 |
+| Username | Password   |
+| -------- | ---------- |
+| admin    | govwaadmin |
+| user1    | govwauser1 |
 
 ### Using GoVWA with FFUZZ
 

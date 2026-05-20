@@ -86,6 +86,10 @@ export function del(url: string): Promise<void> {
     return request<void>("DELETE", url);
 }
 
+export function put<T>(url: string, body?: unknown): Promise<T> {
+    return request<T>("PUT", url, body);
+}
+
 export function delWithParams<T = void>(
     url: string,
     params?: Record<string, string | number | undefined>,

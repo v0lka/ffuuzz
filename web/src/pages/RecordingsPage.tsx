@@ -49,7 +49,7 @@ export default function RecordingsPage() {
     const { data, isLoading, error } = useRecordings({
         limit: PAGE_SIZE,
         offset,
-        host: host || undefined,
+        host: treeFilter?.host || host || undefined,
         path_prefix: treeFilter?.pathPrefix || undefined,
     });
     const deleteMutation = useDeleteRecording();
@@ -101,7 +101,7 @@ export default function RecordingsPage() {
         setExporting(true);
         try {
             await exportRecordings({
-                host: host || undefined,
+                host: treeFilter?.host || host || undefined,
                 path_prefix: treeFilter?.pathPrefix || undefined,
             });
         } finally {
@@ -110,7 +110,7 @@ export default function RecordingsPage() {
     }, [host, treeFilter]);
 
     return (
-        <div className="flex">
+        <div className="flex flex-1">
             {/* Main content */}
             <div className="flex-1 min-w-0 space-y-4 pr-2">
                 <div className="flex items-center justify-between">

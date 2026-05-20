@@ -5,14 +5,15 @@ package triage
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // MaxResponseSnippetLen is the max chars of response body sent to an LLM.
-const MaxResponseSnippetLen = 2000
+const MaxResponseSnippetLen = 4096
 
 // AnalyzeFindingSystemPrompt is the system prompt for classifying a single finding.
 // It requests structured JSON output.
-const AnalyzeFindingSystemPrompt = `You are a security triage specialist analyzing HTTP fuzzing findings.
+const AnalyzeFindingSystemPrompt = `You are a security triage expert analyzing HTTP fuzzing findings.
 For each finding, classify the vulnerability, assess severity, and provide remediation.
 
 You MUST respond with ONLY a valid JSON object with these fields:
@@ -26,15 +27,20 @@ You MUST respond with ONLY a valid JSON object with these fields:
 }
 
 Classification guidance:
-- Server errors (5xx) that reveal stack traces → "Information Disclosure"
-- Timeouts → "Denial of Service"
-- SQL error messages → "SQL Injection"
-- Command output in response → "Command Injection"
-- XSS reflection → "Cross-Site Scripting"
-- Path traversal signs → "Path Traversal"
-- JWT manipulation → "Authentication Bypass"
-- Reflected input in headers → "Header Injection"
-- Latency spikes without other signs → "Performance Anomaly"
+- Stack traces, debug info, internal paths, or sensitive file contents in error responses → "Information Disclosure"
+- Timeouts (ONLY for 408/504 with abnormally long delays), resource exhaustion from oversized payloads → "Denial of Service"
+- SQL error messages, 5xx on SQL payloads, or blind-injection signs (SLEEP delays, boolean-based response differences) → "SQL Injection"
+- Shell command output reflected in response, or blind time-based signs (sleep commands causing ≥5s delays) → "Command Injection"
+- Unescaped HTML/JS payload reflected in response body or headers → "Cross-Site Scripting"
+- File contents, directory listings, or path-based errors from ../ sequences → "Path Traversal"
+- JNDI/LDAP/RMI/DNS callback signs, "lookup" errors, or ${jndi:...} payload responses → "JNDI Injection"
+- Template expression ({{...}}, ${...}, #{...}, <%=...%>) evaluated and reflected as computed result → "Server-Side Template Injection"
+- Internal network resources accessed (169.254.169.254, 127.0.0.1, file://, gopher://) reflected or causing unique errors → "Server-Side Request Forgery"
+- XML parser errors referencing external entities, or file contents leaked via <!ENTITY/<!DOCTYPE declarations → "XML External Entity"
+- __proto__/constructor/prototype pollution causing unexpected property access or type confusion → "Prototype Pollution"
+- JWT/cookie manipulation bypassing auth checks (200 OK on previously-protected endpoints) → "Authentication Bypass"
+- CRLF sequences or reflected input appearing in HTTP response headers → "Header Injection"
+- Latency spikes without other vulnerability indicators → "Performance Anomaly"
 - No security impact visible → "No Vulnerability"
 
 Severity guidance:
@@ -52,14 +58,38 @@ Confidence:
 - <0.3: probably false positive or noise`
 
 // BuildAnalyzeFindingPrompt formats the finding analysis prompt with actual data.
+// When req.PreviousAnalysis is non-nil, the prompt includes the previous analysis
+// result so the LLM can re-evaluate with full context.
 func BuildAnalyzeFindingPrompt(req LLMAnalysisRequest) string {
 	snippet := req.ResponseSnippet
 	if len(snippet) > MaxResponseSnippetLen {
 		snippet = snippet[:MaxResponseSnippetLen] + "\n...[truncated]"
 	}
 
-	return fmt.Sprintf(`Analyze this fuzzing finding:
+	var previous string
+	if req.PreviousAnalysis != nil {
+		previous = fmt.Sprintf(`
+Previous Analysis Result:
+  Classification: %s
+  Severity: %s
+  Confidence: %.2f
+  Exploitability: %s
+  Remediation: %s
+  Description: %s
+  Analyzed At: %s
+  Model Used: %s
+`, req.PreviousAnalysis.Classification,
+			req.PreviousAnalysis.Severity,
+			req.PreviousAnalysis.Confidence,
+			req.PreviousAnalysis.Exploitability,
+			req.PreviousAnalysis.Remediation,
+			req.PreviousAnalysis.Description,
+			req.PreviousAnalysis.AnalyzedAt.Format(time.RFC3339),
+			req.PreviousAnalysis.ModelUsed)
+	}
 
+	return fmt.Sprintf(`Analyze this fuzzing finding:
+%s
 Finding ID: %s
 Type: %s
 HTTP Method: %s
@@ -71,6 +101,7 @@ Anomalous Status: %d
 
 Response Body (anomalous):
 %s`,
+		previous,
 		req.FindingID,
 		req.FindingType,
 		req.Method,

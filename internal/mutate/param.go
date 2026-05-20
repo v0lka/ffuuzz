@@ -12,9 +12,16 @@ import (
 
 // ParamMutator injects fuzz payloads into query parameter values (GET) and
 // form-encoded body parameter values (POST application/x-www-form-urlencoded).
-type ParamMutator struct{}
+type ParamMutator struct {
+	EnabledOps []string // nil or empty = all enabled
+}
 
 func (m *ParamMutator) Mutate(ex model.Exchange, rng *rand.Rand, _ float64) MutationResult {
+	ops := resolveOps(m.EnabledOps, allParamOps)
+	if len(ops) == 0 {
+		return MutationResult{Exchange: ex, Operators: []string{"param:noop"}}
+	}
+
 	queryParams, err := url.ParseQuery(ex.Request.Query)
 	if err != nil {
 		queryParams = url.Values{}

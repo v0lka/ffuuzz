@@ -24,6 +24,7 @@ import (
 type mockCampaignStore struct {
 	updateStatusFn   func(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error)
 	incrementStatsFn func(ctx context.Context, id string, testsDelta, findingsDelta int) error
+	listFn           func(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error)
 }
 
 func (m *mockCampaignStore) UpdateStatus(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error) {
@@ -37,6 +38,12 @@ func (m *mockCampaignStore) IncrementStats(ctx context.Context, id string, tests
 		return m.incrementStatsFn(ctx, id, testsDelta, findingsDelta)
 	}
 	return nil
+}
+func (m *mockCampaignStore) List(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error) {
+	if m.listFn != nil {
+		return m.listFn(ctx, statusFilter, limit, offset)
+	}
+	return nil, nil
 }
 
 type mockFindingStore struct {
@@ -73,10 +80,6 @@ func (m *mockFindingStore) SetReproduceStatus(ctx context.Context, id, status st
 	return nil
 }
 
-func (m *mockFindingStore) UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error {
-	return nil
-}
-
 type mockArtifactStore struct {
 	createFn func(ctx context.Context, a model.Artifact) error
 }
@@ -97,7 +100,7 @@ func TestNewEngine(t *testing.T) {
 	as := &mockArtifactStore{}
 	logger := zerolog.Nop()
 
-	e := NewEngine(cs, fs, as, nil, nil, "/tmp/artifacts", logger)
+	e := NewEngine(cs, fs, as, nil, "/tmp/artifacts", logger)
 	if e == nil {
 		t.Fatal("expected non-nil Engine")
 	}
@@ -119,14 +122,14 @@ func TestNewEngine(t *testing.T) {
 }
 
 func TestIsRunning_NotRunning(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	if e.IsRunning("nonexistent") {
 		t.Error("expected IsRunning=false for non-existent campaign")
 	}
 }
 
 func TestIsRunning_Running(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	e.mu.Lock()
 	e.running["camp-1"] = func() {}
 	e.mu.Unlock()
@@ -137,7 +140,7 @@ func TestIsRunning_Running(t *testing.T) {
 }
 
 func TestStopCampaign_NotRunning(t *testing.T) {
-	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(&mockCampaignStore{}, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	err := e.StopCampaign(context.Background(), "nonexistent")
 	if err == nil {
 		t.Error("expected error for non-running campaign")
@@ -151,7 +154,7 @@ func TestStopCampaign_Running(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.mu.Lock()
@@ -181,7 +184,7 @@ func TestStopCampaign_UpdateStatusError(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 
 	e.mu.Lock()
 	e.running["camp-1"] = func() {}
@@ -193,6 +196,75 @@ func TestStopCampaign_UpdateStatusError(t *testing.T) {
 	}
 }
 
+func TestStopCampaign_FromStarting(t *testing.T) {
+	fallbackCalled := false
+	cs := &mockCampaignStore{
+		updateStatusFn: func(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error) {
+			if oldStatus == model.CampaignRunning && newStatus == model.CampaignStopping {
+				return false, nil // optimistic lock failure — status is STARTING
+			}
+			if oldStatus == model.CampaignStarting && newStatus == model.CampaignStopping {
+				fallbackCalled = true
+				return true, nil
+			}
+			return true, nil
+		},
+	}
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+
+	e.mu.Lock()
+	e.running["camp-1"] = func() {}
+	e.mu.Unlock()
+
+	err := e.StopCampaign(context.Background(), "camp-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fallbackCalled {
+		t.Error("expected fallback STARTING->STOPPING to be called")
+	}
+}
+
+func TestRunCampaign_FinalStatusFromStopping(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer backend.Close()
+
+	fallbackCalled := false
+	cs := &mockCampaignStore{
+		updateStatusFn: func(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error) {
+			if oldStatus == model.CampaignRunning && newStatus == model.CampaignStopped {
+				return false, nil // optimistic lock failure — status is STOPPING
+			}
+			if oldStatus == model.CampaignStopping && newStatus == model.CampaignStopped {
+				fallbackCalled = true
+				return true, nil
+			}
+			return true, nil
+		},
+	}
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
+
+	seeds := []model.RecordingSession{
+		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
+	}
+
+	cfg := model.CampaignConfig{
+		Target: model.TargetURL{BaseURL: backend.URL},
+		Limits: model.CampaignLimits{Workers: 1, MaxTests: 1},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled — simulates StopCampaign being called
+
+	e.runCampaign(ctx, "camp-stopping", cfg, seeds, nil)
+
+	if !fallbackCalled {
+		t.Error("expected fallback STOPPING->STOPPED to be called")
+	}
+}
+
 func TestStopAll(t *testing.T) {
 	cancelledIDs := make(map[string]bool)
 	cs := &mockCampaignStore{
@@ -200,7 +272,7 @@ func TestStopAll(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 
 	e.mu.Lock()
 	e.running["c1"] = func() { cancelledIDs["c1"] = true }
@@ -228,12 +300,77 @@ func TestFailCampaign(t *testing.T) {
 			return true, nil
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	e.failCampaign(context.Background(), "camp-1", model.CampaignStarting, context.DeadlineExceeded)
 
 	if !updateCalled {
 		t.Error("expected UpdateStatus to be called")
 	}
+}
+
+func TestRecoverStuckCampaigns(t *testing.T) {
+	listCalls := 0
+	updates := make(map[string]model.CampaignStatus)
+	cs := &mockCampaignStore{
+		listFn: func(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error) {
+			listCalls++
+			switch statusFilter {
+			case string(model.CampaignStarting):
+				return []model.Campaign{{ID: "c-starting"}}, nil
+			case string(model.CampaignRunning):
+				return []model.Campaign{{ID: "c-running"}}, nil
+			case string(model.CampaignStopping):
+				return []model.Campaign{{ID: "c-stopping"}}, nil
+			}
+			return nil, nil
+		},
+		updateStatusFn: func(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error) {
+			updates[id] = newStatus
+			return true, nil
+		},
+	}
+
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	e.RecoverStuckCampaigns(context.Background())
+
+	if listCalls != 3 {
+		t.Errorf("expected 3 List calls, got %d", listCalls)
+	}
+	if len(updates) != 3 {
+		t.Errorf("expected 3 updates, got %d", len(updates))
+	}
+	for _, id := range []string{"c-starting", "c-running", "c-stopping"} {
+		if updates[id] != model.CampaignStopped {
+			t.Errorf("expected %s to be STOPPED, got %s", id, updates[id])
+		}
+	}
+}
+
+func TestRecoverStuckCampaigns_ListError(t *testing.T) {
+	cs := &mockCampaignStore{
+		listFn: func(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	// Should not panic
+	e.RecoverStuckCampaigns(context.Background())
+}
+
+func TestRecoverStuckCampaigns_UpdateError(t *testing.T) {
+	cs := &mockCampaignStore{
+		listFn: func(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error) {
+			return []model.Campaign{{ID: "c1"}}, nil
+		},
+		updateStatusFn: func(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error) {
+			return false, fmt.Errorf("db error")
+		},
+	}
+
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
+	// Should not panic even when UpdateStatus fails
+	e.RecoverStuckCampaigns(context.Background())
 }
 
 func TestStartCampaign_UpdateStatusFails(t *testing.T) {
@@ -242,7 +379,7 @@ func TestStartCampaign_UpdateStatusFails(t *testing.T) {
 			return false, context.DeadlineExceeded
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	campaign := &model.Campaign{ID: "c1", Status: model.CampaignCreated}
 	err := e.StartCampaign(context.Background(), campaign)
 	if err == nil {
@@ -256,7 +393,7 @@ func TestStartCampaign_NotExpectedState(t *testing.T) {
 			return false, nil // not in expected state
 		},
 	}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, "", zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, "", zerolog.Nop())
 	campaign := &model.Campaign{ID: "c1", Status: model.CampaignCreated}
 	err := e.StartCampaign(context.Background(), campaign)
 	if err == nil {
@@ -275,7 +412,7 @@ func TestRunCampaign_MaxTests(t *testing.T) {
 	cs := &mockCampaignStore{}
 	fs := &mockFindingStore{}
 	as := &mockArtifactStore{}
-	e := NewEngine(cs, fs, as, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, as, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -315,7 +452,7 @@ func TestRunCampaign_DurationLimit(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -345,7 +482,7 @@ func TestRunCampaign_ContextCancelled(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -373,7 +510,7 @@ func TestRunCampaign_WithRateLimit(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -398,7 +535,7 @@ func TestRunCampaign_WithSequenceMutation(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -429,7 +566,7 @@ func TestRunCampaign_DefaultWorkers(t *testing.T) {
 	defer backend.Close()
 
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, &mockFindingStore{}, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -457,7 +594,7 @@ func TestRunCampaign_Anomaly5xxDetection(t *testing.T) {
 		},
 	}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{
@@ -495,7 +632,7 @@ func TestRunCampaign_WithConfirmation(t *testing.T) {
 		},
 	}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -519,7 +656,7 @@ func TestRunCampaign_WithMinimization(t *testing.T) {
 
 	fs := &mockFindingStore{}
 	cs := &mockCampaignStore{}
-	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, nil, t.TempDir(), zerolog.Nop())
+	e := NewEngine(cs, fs, &mockArtifactStore{}, nil, t.TempDir(), zerolog.Nop())
 
 	seeds := []model.RecordingSession{
 		{ID: "s1", Entries: []model.Exchange{{RequestID: "r1", Request: model.RequestData{Method: "GET", Path: "/"}}}},
@@ -749,7 +886,7 @@ func TestWorkerHandleHit_Dedup(t *testing.T) {
 	}
 	session := model.RecordingSession{ID: "s1"}
 
-	w.handleHit(context.Background(), hit, session, "", 0, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 0, nil)
 }
 
 func TestWorkerHandleHit_ExistsBySignatureError(t *testing.T) {
@@ -774,7 +911,7 @@ func TestWorkerHandleHit_ExistsBySignatureError(t *testing.T) {
 	}
 
 	// Should not panic, should return early
-	w.handleHit(context.Background(), hit, model.RecordingSession{}, "", 0, nil)
+	w.handleHit(context.Background(), hit, model.RecordingSession{}, nil, "", 0, nil)
 }
 
 func TestWorkerHandleHit_CreateError(t *testing.T) {
@@ -799,7 +936,7 @@ func TestWorkerHandleHit_CreateError(t *testing.T) {
 	}
 
 	// Should not panic, should return after create error
-	w.handleHit(context.Background(), hit, model.RecordingSession{}, "", 0, nil)
+	w.handleHit(context.Background(), hit, model.RecordingSession{}, nil, "", 0, nil)
 }
 
 func TestWorkerHandleHit_NewFinding(t *testing.T) {
@@ -836,7 +973,7 @@ func TestWorkerHandleHit_NewFinding(t *testing.T) {
 	}
 	session := model.RecordingSession{ID: "s1"}
 
-	w.handleHit(context.Background(), hit, session, "", 0, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 0, nil)
 
 	if !findingCreated {
 		t.Error("expected finding to be created")
@@ -888,7 +1025,7 @@ func TestWorkerHandleHit_WithConfirmation(t *testing.T) {
 		},
 	}
 
-	w.handleHit(context.Background(), hit, session, "", 42, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 42, nil)
 
 	if !confirmed {
 		t.Log("confirmation may not have succeeded (depends on replay)")
@@ -932,7 +1069,7 @@ func TestWorkerHandleHit_WithMinimization(t *testing.T) {
 	}
 
 	// Should not panic - exercises the minimization code path
-	w.handleHit(context.Background(), hit, session, "", 42, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 42, nil)
 }
 
 func TestWorkerHandleHit_ConfirmationError(t *testing.T) {
@@ -965,7 +1102,7 @@ func TestWorkerHandleHit_ConfirmationError(t *testing.T) {
 	}
 
 	// Should not panic even when confirmation fails
-	w.handleHit(context.Background(), hit, session, "", 0, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 0, nil)
 }
 
 func TestWorkerHandleHit_UpdateStatusError(t *testing.T) {
@@ -1008,7 +1145,7 @@ func TestWorkerHandleHit_UpdateStatusError(t *testing.T) {
 	}
 
 	// Should not panic even when update status fails
-	w.handleHit(context.Background(), hit, session, "", 0, nil)
+	w.handleHit(context.Background(), hit, session, nil, "", 0, nil)
 }
 
 func TestWorkerProcessTask_BasicMutation(t *testing.T) {

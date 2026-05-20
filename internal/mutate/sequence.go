@@ -7,31 +7,34 @@ import (
 )
 
 // SeqMutator implements SequenceMutator for exchange sequence mutations.
-type SeqMutator struct{}
+type SeqMutator struct {
+	EnabledOps []string // nil or empty = all enabled
+}
 
 func (m *SeqMutator) Mutate(exs []model.Exchange, rng *rand.Rand, intensity float64) SequenceMutationResult {
 	if len(exs) <= 1 {
 		return SequenceMutationResult{Exchanges: exs, Operators: []string{"seq:noop"}}
 	}
 
-	op := rng.Intn(4)
-	var opName string
+	ops := resolveOps(m.EnabledOps, AllSeqOps)
+	if len(ops) == 0 {
+		return SequenceMutationResult{Exchanges: exs, Operators: []string{"seq:noop"}}
+	}
+
+	opName := "seq:" + ops[rng.Intn(len(ops))]
 	result := copyExchanges(exs)
 
-	switch op {
-	case 0:
-		opName = "seq:drop"
+	switch opName {
+	case "seq:drop":
 		result = SeqDrop(result, rng)
-	case 1:
-		opName = "seq:duplicate"
+	case "seq:duplicate":
 		result = SeqDuplicate(result, rng)
-	case 2:
-		opName = "seq:swap"
+	case "seq:swap":
 		result = SeqSwap(result, rng)
-	case 3:
+	case "seq:perstep":
 		// Per-step: apply a primitive mutation to one random exchange
 		idx := rng.Intn(len(result))
-		p := &PrimitiveMutator{}
+		p := &PrimitiveMutator{EnabledOps: allPrimitiveOps}
 		r := p.Mutate(result[idx], rng, intensity)
 		result[idx] = r.Exchange
 		opName = "seq:perstep(" + r.Operators[0] + ")"

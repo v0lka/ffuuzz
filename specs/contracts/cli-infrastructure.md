@@ -69,6 +69,7 @@ apiSrv := api.NewServer(api.ServerConfig{
     ArtifactDir: cfg.ArtifactDir,
     WebFS:       webFS,
     Logger:      logger,
+    EnvPath:     ".env",
 })
 
 // 12. Vulnerability grouping (background goroutine)
@@ -89,7 +90,7 @@ The wiring happens in `internal/cli/serve.go:runServe()` in the `serve` subcomma
 8. **Recorder** — depends on `RecordingStore` + `Resolver`
 9. **Cert Store** — depends on `CertCacheConfig` + `TLSConfig`
 10. **MITM Proxy** — depends on `CertStore` + `Recorder`
-11. **API Server** — depends on all stores + `Engine` + `LLMTriager` + WebFS
+11. **API Server** — depends on all stores + `Engine` + `LLMTriager` + WebFS + `.env` file path (for configuration API)
 12. **Vulnerability Grouping Loop** — depends on `FindingStore`; periodically groups ungrouped confirmed findings (every 15s)
 
 ## Data Flow

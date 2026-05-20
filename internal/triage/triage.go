@@ -42,11 +42,11 @@ func NewTriager() *Triager {
 }
 
 // Signature computes a deduplication signature for an anomaly hit.
-// Format: TYPE|METHOD|normalizedPath|hash(payload)
+// Format: TYPE|METHOD|normalizedPath|statusCode|hash(payload)
 func (t *Triager) Signature(hit anomaly.AnomalyHit) string {
 	normalizedPath := NormalizePath(hit.Endpoint)
 	payloadHash := HashPayload(hit.Exchange.Request.BodyB64)
-	return fmt.Sprintf("%s|%s|%s|%s", hit.Type, hit.Method, normalizedPath, payloadHash)
+	return fmt.Sprintf("%s|%s|%s|%d|%s", hit.Type, hit.Method, normalizedPath, hit.Details.HTTPStatus, payloadHash)
 }
 
 // fuzzSegmentThreshold is the minimum segment length considered a fuzz payload.
@@ -69,7 +69,8 @@ func NormalizePath(path string) string {
 }
 
 // HashPayload produces a short hash of the request body for dedup.
-// For JSON bodies, it sorts keys to normalize structure.
+// For JSON bodies, it sorts keys to normalize structure while preserving
+// values so that different payloads on the same endpoint are not collapsed.
 // For non-JSON, it hashes the raw decoded content.
 func HashPayload(bodyB64 string) string {
 	if bodyB64 == "" {
@@ -83,7 +84,7 @@ func HashPayload(bodyB64 string) string {
 		rawBytes = decoded
 		var parsed interface{}
 		if json.Unmarshal(decoded, &parsed) == nil {
-			normalized := normalizeJSON(parsed)
+			normalized := sortJSONKeys(parsed)
 			raw, err := json.Marshal(normalized)
 			if err == nil {
 				rawBytes = raw
@@ -98,8 +99,11 @@ func HashPayload(bodyB64 string) string {
 	return hex.EncodeToString(h[:8]) // 16 hex chars
 }
 
-// normalizeJSON sorts object keys and strips values to produce a structural fingerprint.
-func normalizeJSON(v interface{}) interface{} {
+// sortJSONKeys recursively sorts object keys to produce a deterministic
+// representation while preserving all values — unlike the old normalizeJSON
+// which replaced values with type names and caused different attacks on the
+// same endpoint to be incorrectly deduplicated.
+func sortJSONKeys(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		keys := make([]string, 0, len(val))
@@ -107,18 +111,19 @@ func normalizeJSON(v interface{}) interface{} {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		result := make(map[string]interface{})
+		result := make(map[string]interface{}, len(val))
 		for _, k := range keys {
-			result[k] = fmt.Sprintf("%T", val[k]) // replace value with type name
+			result[k] = sortJSONKeys(val[k])
 		}
 		return result
 	case []interface{}:
-		if len(val) > 0 {
-			return []interface{}{fmt.Sprintf("%T", val[0]), len(val)}
+		result := make([]interface{}, len(val))
+		for i, item := range val {
+			result[i] = sortJSONKeys(item)
 		}
-		return val
+		return result
 	default:
-		return fmt.Sprintf("%T", v)
+		return v
 	}
 }
 

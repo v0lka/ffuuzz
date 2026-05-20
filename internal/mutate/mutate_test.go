@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/url"
+	"strings"
 	"testing"
 
 	"ffuuzz/internal/model"
@@ -730,8 +731,8 @@ func TestPipeline_ParamsMutator(t *testing.T) {
 }
 
 func TestFuzzStrings_Shared(t *testing.T) {
-	if len(fuzzStrings) != 32 {
-		t.Errorf("expected 32 fuzz strings, got %d", len(fuzzStrings))
+	if len(fuzzStrings) != 77 {
+		t.Errorf("expected 77 fuzz strings, got %d", len(fuzzStrings))
 	}
 	// Spot-check known payloads across all categories
 	found := map[string]bool{
@@ -759,5 +760,211 @@ func TestFuzzStrings_Shared(t *testing.T) {
 		if !present {
 			t.Errorf("expected fuzz string %q not found", payload)
 		}
+	}
+}
+
+// --- Operator filter tests ---
+
+func TestFilterOperators_Empty(t *testing.T) {
+	result := filterOperators(nil, allURIOps)
+	if len(result) != len(allURIOps) {
+		t.Fatalf("expected %d ops for nil enabled, got %d", len(allURIOps), len(result))
+	}
+	result = filterOperators([]string{}, allURIOps)
+	if len(result) != len(allURIOps) {
+		t.Fatalf("expected %d ops for empty enabled, got %d", len(allURIOps), len(result))
+	}
+}
+
+func TestFilterOperators_Subset(t *testing.T) {
+	result := filterOperators([]string{"path_segment", "query_param"}, allURIOps)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 ops, got %d", len(result))
+	}
+	if result[0] != "path_segment" || result[1] != "query_param" {
+		t.Errorf("unexpected result: %v", result)
+	}
+}
+
+func TestFilterOperators_All(t *testing.T) {
+	result := filterOperators(allURIOps, allURIOps)
+	if len(result) != len(allURIOps) {
+		t.Fatalf("expected %d ops, got %d", len(allURIOps), len(result))
+	}
+}
+
+func TestFilterOperators_UnknownFallsBack(t *testing.T) {
+	result := filterOperators([]string{"nonexistent"}, allURIOps)
+	if len(result) != len(allURIOps) {
+		t.Fatalf("expected fallback to all ops for unknown, got %d", len(result))
+	}
+}
+
+func TestFilterOperators_AllPrimitiveOps(t *testing.T) {
+	result := filterOperators(nil, allPrimitiveOps)
+	if len(result) != 6 {
+		t.Fatalf("expected 6 primitive ops, got %d", len(result))
+	}
+}
+
+func TestFilterOperators_AllSeqOps(t *testing.T) {
+	result := filterOperators(nil, AllSeqOps)
+	if len(result) != 4 {
+		t.Fatalf("expected 4 seq ops, got %d", len(result))
+	}
+}
+
+func TestURIMutator_OperatorFilter(t *testing.T) {
+	// Only enable path_segment and query_param
+	m := &URIMutator{MaxURLLen: 8192, EnabledOps: []string{"path_segment", "query_param"}}
+	for seed := int64(0); seed < 50; seed++ {
+		rng := newRNG(seed)
+		ex := makeEx("GET", "/api/users/123", "page=1&limit=10")
+		result := m.Mutate(ex, rng, 1.0)
+		if len(result.Operators) == 0 {
+			t.Error("expected at least one operator")
+		}
+		op := result.Operators[0]
+		if op != "uri:path_segment" && op != "uri:query_param" {
+			t.Errorf("unexpected operator %q (expected path_segment or query_param only)", op)
+		}
+	}
+}
+
+func TestHeaderMutator_OperatorFilter(t *testing.T) {
+	m := &HeaderMutator{MaxHdrLen: 8192, EnabledOps: []string{"add"}}
+	for seed := int64(0); seed < 30; seed++ {
+		rng := newRNG(seed)
+		ex := makeEx("GET", "/api", "")
+		result := m.Mutate(ex, rng, 1.0)
+		if result.Operators[0] != "header:add" {
+			t.Errorf("expected header:add, got %v", result.Operators)
+		}
+	}
+}
+
+func TestJSONMutator_OperatorFilter(t *testing.T) {
+	m := &JSONMutator{MaxBodyLen: 1 << 20, EnabledOps: []string{"string_mutation"}}
+	body := map[string]interface{}{"name": "test", "age": 42}
+	for seed := int64(0); seed < 30; seed++ {
+		rng := newRNG(seed)
+		ex := makeExWithBody("POST", "/api", body)
+		result := m.Mutate(ex, rng, 1.0)
+		if len(result.Operators) == 0 {
+			t.Error("expected operator")
+		}
+		if result.Operators[0] != "json:string_mutation" {
+			t.Errorf("expected json:string_mutation, got %v", result.Operators)
+		}
+	}
+}
+
+func TestPrimitiveMutator_OperatorFilter(t *testing.T) {
+	data := make([]byte, 100)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	ex := model.Exchange{
+		Request: model.RequestData{
+			BodyB64: base64.StdEncoding.EncodeToString(data),
+		},
+	}
+	m := &PrimitiveMutator{EnabledOps: []string{"bitflip"}}
+	for seed := int64(0); seed < 30; seed++ {
+		rng := newRNG(seed)
+		result := m.Mutate(ex, rng, 1.0)
+		if result.Operators[0] != "primitive:bitflip" {
+			t.Errorf("expected primitive:bitflip, got %v", result.Operators)
+		}
+	}
+}
+
+func TestSeqMutator_OperatorFilter(t *testing.T) {
+	m := &SeqMutator{EnabledOps: []string{"swap"}}
+	exs := []model.Exchange{
+		makeEx("GET", "/a", ""),
+		makeEx("POST", "/b", ""),
+		makeEx("PUT", "/c", ""),
+	}
+	for seed := int64(0); seed < 30; seed++ {
+		rng := newRNG(seed)
+		result := m.Mutate(exs, rng, 0.5)
+		if result.Operators[0] != "seq:swap" {
+			t.Errorf("expected seq:swap, got %v", result.Operators)
+		}
+	}
+}
+
+func TestPipeline_OperatorFiltering(t *testing.T) {
+	cfg := Config{
+		PathQuery:      true,
+		JSONBody:       true,
+		Intensity:      1.0,
+		MaxURLLen:      8192,
+		MaxBodyLen:     1 << 20,
+		URIEnabledOps:  []string{"path_segment"},
+		JSONEnabledOps: []string{"string_mutation"},
+	}
+	p := NewPipeline(cfg)
+	body := map[string]interface{}{"key": "value"}
+	for seed := int64(0); seed < 50; seed++ {
+		rng := newRNG(seed)
+		ex := makeExWithBody("POST", "/api/test", body)
+		result := p.Mutate(ex, rng, 1.0)
+		if len(result.Operators) == 0 {
+			t.Error("expected at least one operator")
+		}
+		for _, op := range result.Operators {
+			if op != "uri:path_segment" && op != "json:string_mutation" && !strings.HasPrefix(op, "primitive:") {
+				t.Errorf("unexpected operator %q", op)
+			}
+		}
+	}
+}
+
+func TestPipeline_BackwardCompatibleNoOperatorConfig(t *testing.T) {
+	// No operator lists = all operators enabled (backward compatible)
+	cfg := Config{
+		PathQuery:  true,
+		Headers:    true,
+		JSONBody:   true,
+		Intensity:  1.0,
+		MaxURLLen:  8192,
+		MaxHdrLen:  8192,
+		MaxBodyLen: 1 << 20,
+	}
+	p := NewPipeline(cfg)
+	body := map[string]interface{}{"key": "value"}
+	foundURI := false
+	foundHeader := false
+	foundJSON := false
+	// With enough seeds, we should see operators from all categories
+	for seed := int64(0); seed < 200; seed++ {
+		rng := newRNG(seed)
+		ex := makeExWithBody("POST", "/api/test", body)
+		result := p.Mutate(ex, rng, 1.0)
+		for _, op := range result.Operators {
+			if strings.HasPrefix(op, "uri:") {
+				foundURI = true
+			}
+			if strings.HasPrefix(op, "header:") {
+				foundHeader = true
+			}
+			if strings.HasPrefix(op, "json:") {
+				foundJSON = true
+			}
+		}
+		if foundURI && foundHeader && foundJSON {
+			break
+		}
+	}
+	if !foundURI {
+		t.Error("expected URI operators to appear")
+	}
+	if !foundHeader {
+		t.Error("expected Header operators to appear")
+	}
+	if !foundJSON {
+		t.Error("expected JSON operators to appear")
 	}
 }

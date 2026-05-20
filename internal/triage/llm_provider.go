@@ -28,15 +28,16 @@ type LLMProvider interface {
 
 // LLMAnalysisRequest carries the data needed to classify a single finding.
 type LLMAnalysisRequest struct {
-	FindingID       string
-	FindingType     string
-	Method          string
-	Endpoint        string
-	MutationType    string
-	MutationPayload string
-	BaselineStatus  int
-	AnomalousStatus int
-	ResponseSnippet string // truncated response body (~2000 chars)
+	FindingID        string
+	FindingType      string
+	Method           string
+	Endpoint         string
+	MutationType     string
+	MutationPayload  string
+	BaselineStatus   int
+	AnomalousStatus  int
+	ResponseSnippet  string             // truncated response body (~2000 chars)
+	PreviousAnalysis *model.LLMAnalysis // non-nil when re-analyzing a previously analyzed finding
 }
 
 // LLMDescriptionRequest carries the data needed to generate a finding description.

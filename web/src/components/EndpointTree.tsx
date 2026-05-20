@@ -13,9 +13,11 @@ import {
     useDeleteRecordingsByPrefix,
     useCampaigns,
     useAddRecordingsToCampaign,
+    useQuickCreateCampaign,
 } from "@/hooks/queries";
 import type { TreePathNode, TreeOrigin, Campaign, CampaignStatus } from "@/types/api";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { InputDialog } from "@/components/InputDialog";
 
 export interface EndpointFilter {
     scheme: string;
@@ -80,10 +82,12 @@ export function EndpointTree({
         null,
     );
     const [campaignSubmenu, setCampaignSubmenu] = useState(false);
+    const [newCampaignCtx, setNewCampaignCtx] = useState<ContextMenuState | null>(null);
 
     // Campaigns for "Add to campaign" context menu
     const { data: allCampaigns } = useCampaigns();
     const addRecordingsMutation = useAddRecordingsToCampaign();
+    const quickCreateMutation = useQuickCreateCampaign();
     const inactiveCampaigns = (allCampaigns ?? []).filter((c: Campaign) =>
         INACTIVE_STATUSES.has(c.status),
     );
@@ -165,6 +169,26 @@ export function EndpointTree({
         setCampaignSubmenu(false);
     };
 
+    const handleNewCampaignClick = () => {
+        setNewCampaignCtx(contextMenu);
+        setContextMenu(null);
+        setCampaignSubmenu(false);
+    };
+
+    const handleQuickCreate = (name: string) => {
+        if (!newCampaignCtx) return;
+        quickCreateMutation.mutate({
+            name,
+            filter: {
+                scheme: newCampaignCtx.scheme,
+                host: newCampaignCtx.host,
+                port: newCampaignCtx.port,
+                path_prefix: newCampaignCtx.pathPrefix || undefined,
+            },
+        });
+        setNewCampaignCtx(null);
+    };
+
     const isActive = (filter: EndpointFilter) =>
         activeFilter !== null &&
         activeFilter.scheme === filter.scheme &&
@@ -174,7 +198,7 @@ export function EndpointTree({
 
     return (
         <div
-            className={`border-l border-base-300 pl-4 ${className ?? ""}`}
+            className={`border-l border-base-300 pl-4 h-full flex flex-col ${className ?? ""}`}
             style={style}
         >
             <div className="flex items-center justify-between mb-2">
@@ -184,7 +208,7 @@ export function EndpointTree({
             {!tree || tree.length === 0 ? (
                 <p className="text-xs text-base-content/50">No endpoints</p>
             ) : (
-                <div className="space-y-1 text-xs overflow-y-auto max-h-[calc(100vh-12rem)]">
+                <div className="space-y-1 text-xs flex-1 overflow-y-auto">
                     {tree.map((origin) => (
                         <OriginNode
                             key={origin.origin}
@@ -203,7 +227,11 @@ export function EndpointTree({
             {contextMenu && (
                 <div
                     className="fixed z-50 bg-base-100 shadow-lg border border-base-300 rounded-lg py-1 min-w-36"
-                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                    style={{
+                        left: contextMenu.x,
+                        top: contextMenu.y,
+                        transform: "translateX(-100%)",
+                    }}
                 >
                     {/* Add to campaign */}
                     <div
@@ -212,7 +240,7 @@ export function EndpointTree({
                         onMouseLeave={() => setCampaignSubmenu(false)}
                     >
                         <button
-                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 flex items-center gap-2"
+                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 flex items-center gap-2 whitespace-nowrap"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setCampaignSubmenu((prev) => !prev);
@@ -227,30 +255,36 @@ export function EndpointTree({
                                 className="absolute z-50 bg-base-100 shadow-lg border border-base-300 rounded-lg py-1 min-w-40 max-h-60 overflow-y-auto"
                                 style={{ right: "100%", top: 0 }}
                             >
-                                {inactiveCampaigns.length === 0 ? (
-                                    <span className="px-3 py-1.5 text-sm text-base-content/50 block">
-                                        No campaigns available
-                                    </span>
-                                ) : (
-                                    inactiveCampaigns.map((c: Campaign) => (
-                                        <button
-                                            key={c.id}
-                                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 truncate"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleAddToCampaign(c.id);
-                                            }}
-                                        >
-                                            {c.name}
-                                        </button>
-                                    ))
+                                <button
+                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 truncate font-medium"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleNewCampaignClick();
+                                    }}
+                                >
+                                    + Add to new campaign
+                                </button>
+                                {inactiveCampaigns.length > 0 && (
+                                    <div className="border-t border-base-300 my-1" />
                                 )}
+                                {inactiveCampaigns.map((c: Campaign) => (
+                                    <button
+                                        key={c.id}
+                                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-base-200 truncate"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleAddToCampaign(c.id);
+                                        }}
+                                    >
+                                        {c.name}
+                                    </button>
+                                ))}
                             </div>
                         )}
                     </div>
                     {/* Delete */}
                     <button
-                        className="w-full text-left px-3 py-1.5 text-sm text-error hover:bg-base-200 flex items-center gap-2"
+                        className="w-full text-left px-3 py-1.5 text-sm text-error hover:bg-base-200 flex items-center gap-2 whitespace-nowrap"
                         onClick={(e) => {
                             e.stopPropagation();
                             setConfirmDelete(contextMenu);
@@ -271,6 +305,18 @@ export function EndpointTree({
                     confirmLabel="Delete"
                     onConfirm={handleDelete}
                     onCancel={() => setConfirmDelete(null)}
+                />
+            )}
+
+            {/* New campaign name input dialog */}
+            {newCampaignCtx && (
+                <InputDialog
+                    title="New Campaign"
+                    label="Campaign name"
+                    placeholder="Enter campaign name"
+                    confirmLabel="Create"
+                    onConfirm={handleQuickCreate}
+                    onCancel={() => setNewCampaignCtx(null)}
                 />
             )}
         </div>

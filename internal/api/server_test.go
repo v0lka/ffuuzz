@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -87,8 +88,10 @@ func (m *mockRecordingStore) ListAll(ctx context.Context, hostFilter, pathPrefix
 type mockCampaignStore struct {
 	getByIDFn               func(ctx context.Context, id string) (*model.Campaign, error)
 	createFn                func(ctx context.Context, c model.Campaign) error
+	createWithFilterFn      func(ctx context.Context, c model.Campaign, scheme, host string, port int, pathPrefix string) (int, error)
 	listFn                  func(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error)
 	addRecordingsByFilterFn func(ctx context.Context, campaignID, scheme, host string, port int, pathPrefix string) (int, error)
+	updateFn                func(ctx context.Context, c model.Campaign) error
 }
 
 func (m *mockCampaignStore) GetByID(ctx context.Context, id string) (*model.Campaign, error) {
@@ -103,6 +106,12 @@ func (m *mockCampaignStore) Create(ctx context.Context, c model.Campaign) error 
 	}
 	return nil
 }
+func (m *mockCampaignStore) CreateWithFilter(ctx context.Context, c model.Campaign, scheme, host string, port int, pathPrefix string) (int, error) {
+	if m.createWithFilterFn != nil {
+		return m.createWithFilterFn(ctx, c, scheme, host, port, pathPrefix)
+	}
+	return 0, nil
+}
 func (m *mockCampaignStore) List(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error) {
 	if m.listFn != nil {
 		return m.listFn(ctx, statusFilter, limit, offset)
@@ -114,6 +123,12 @@ func (m *mockCampaignStore) AddRecordingsByFilter(ctx context.Context, campaignI
 		return m.addRecordingsByFilterFn(ctx, campaignID, scheme, host, port, pathPrefix)
 	}
 	return 0, nil
+}
+func (m *mockCampaignStore) Update(ctx context.Context, c model.Campaign) error {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, c)
+	}
+	return nil
 }
 
 type mockFindingStore struct {
@@ -1627,6 +1642,49 @@ func TestGetCampaignStats_AllFindingTypes(t *testing.T) {
 	srv.router.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestGetCampaignStats_FinishedTestsPerSecFrozen(t *testing.T) {
+	// Simulate a campaign that ran for 10 seconds then finished 60 seconds ago.
+	startedAt := time.Now().Add(-70 * time.Second)
+	finishedAt := time.Now().Add(-60 * time.Second)
+	srv := newTestServer(func(cfg *ServerConfig) {
+		cfg.Campaigns = &mockCampaignStore{
+			getByIDFn: func(ctx context.Context, id string) (*model.Campaign, error) {
+				return &model.Campaign{
+					ID:           id,
+					Status:       model.CampaignFinished,
+					StartedAt:    &startedAt,
+					FinishedAt:   &finishedAt,
+					TestsDone:    100,
+					RecordingIDs: []string{},
+				}, nil
+			},
+		}
+		cfg.Findings = &mockFindingStore{
+			countByTypeFn: func(ctx context.Context, campaignID string) (map[model.FindingType]int, error) {
+				return map[model.FindingType]int{}, nil
+			},
+		}
+	})
+	req := httptest.NewRequest("GET", "/api/v1/campaigns/11111111-1111-1111-1111-111111111111/stats", nil)
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var stats model.CampaignStats
+	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Expected: 100 tests / 10 seconds = 10.0 tests/sec
+	// If the bug were present (using time.Since), it would be ~100/70 ≈ 1.4
+	expected := 10.0
+	if math.Abs(stats.TestsPerSec-expected) > 1.0 {
+		t.Errorf("tests_per_sec = %.2f, want approximately %.1f (frozen at finished_at - started_at)", stats.TestsPerSec, expected)
 	}
 }
 

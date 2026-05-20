@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ func newAnthropicProvider(cfg config.LLMConfig, logger zerolog.Logger) *anthropi
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))
 	}
+	opts = append(opts, option.WithHTTPClient(&http.Client{
+		Timeout: cfg.Timeout + 10*time.Second,
+	}))
 
 	return &anthropicProvider{
 		client:    anthropic.NewClient(opts...),

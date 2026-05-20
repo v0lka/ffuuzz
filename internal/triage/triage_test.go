@@ -262,13 +262,14 @@ func TestSignature_Format(t *testing.T) {
 			},
 		},
 	}
+	hit.Details.HTTPStatus = 500
 
 	sig := triager.Signature(hit)
 
-	// Format: TYPE|METHOD|normalizedPath|hash
+	// Format: TYPE|METHOD|normalizedPath|statusCode|hash
 	parts := splitSignature(sig)
-	if len(parts) != 4 {
-		t.Fatalf("Signature has %d parts, want 4: %q", len(parts), sig)
+	if len(parts) != 5 {
+		t.Fatalf("Signature has %d parts, want 5: %q", len(parts), sig)
 	}
 	if parts[0] != "timeout" {
 		t.Errorf("Signature type = %q, want %q", parts[0], "timeout")
@@ -279,8 +280,11 @@ func TestSignature_Format(t *testing.T) {
 	if parts[2] != "/api/users/{id}" {
 		t.Errorf("Signature path = %q, want %q", parts[2], "/api/users/{id}")
 	}
-	if len(parts[3]) != 16 {
-		t.Errorf("Signature hash length = %d, want 16", len(parts[3]))
+	if parts[3] != "500" {
+		t.Errorf("Signature status = %q, want %q", parts[3], "500")
+	}
+	if len(parts[4]) != 16 {
+		t.Errorf("Signature hash length = %d, want 16", len(parts[4]))
 	}
 }
 
@@ -346,6 +350,35 @@ func TestSignature_NormalizesIDs(t *testing.T) {
 	s2 := triager.Signature(hit2)
 	if s1 != s2 {
 		t.Errorf("IDs should be normalized to same signature: %q vs %q", s1, s2)
+	}
+}
+
+func TestSignature_DifferentStatusCodes(t *testing.T) {
+	triager := NewTriager()
+	base := anomaly.AnomalyHit{
+		Type:     "server_error",
+		Method:   "GET",
+		Endpoint: "/api/test",
+		Exchange: model.Exchange{
+			Request: model.RequestData{BodyB64: "dGVzdA=="},
+		},
+	}
+	hit500 := base
+	hit500.Details.HTTPStatus = 500
+	hit502 := base
+	hit502.Details.HTTPStatus = 502
+	hit200 := base
+	hit200.Details.HTTPStatus = 200
+
+	s500 := triager.Signature(hit500)
+	s502 := triager.Signature(hit502)
+	s200 := triager.Signature(hit200)
+
+	if s500 == s502 {
+		t.Errorf("different HTTP status codes (500 vs 502) should produce different signatures")
+	}
+	if s500 == s200 {
+		t.Errorf("different HTTP status codes (500 vs 200) should produce different signatures")
 	}
 }
 
@@ -721,39 +754,51 @@ func TestMinimizeJSONBody_InvalidIndex(t *testing.T) {
 	}
 }
 
-func TestNormalizeJSON_Map(t *testing.T) {
+func TestSortJSONKeys_Map(t *testing.T) {
 	input := map[string]interface{}{
 		"name": "John",
 		"age":  float64(30),
 	}
-	result := normalizeJSON(input)
+	result := sortJSONKeys(input)
 	m, ok := result.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected map, got %T", result)
 	}
-	if m["name"] != "string" {
-		t.Errorf("name type = %v, want 'string'", m["name"])
+	// Values must be preserved (not replaced with type names)
+	if m["name"] != "John" {
+		t.Errorf("name = %v, want 'John'", m["name"])
 	}
-	if m["age"] != "float64" {
-		t.Errorf("age type = %v, want 'float64'", m["age"])
+	if m["age"] != float64(30) {
+		t.Errorf("age = %v, want float64(30)", m["age"])
+	}
+	// Keys must be sorted alphabetically
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	if keys[0] != "age" || keys[1] != "name" {
+		t.Errorf("keys not sorted: %v", keys)
 	}
 }
 
-func TestNormalizeJSON_Array(t *testing.T) {
+func TestSortJSONKeys_Array(t *testing.T) {
 	input := []interface{}{"a", "b", "c"}
-	result := normalizeJSON(input)
+	result := sortJSONKeys(input)
 	arr, ok := result.([]interface{})
 	if !ok {
 		t.Fatalf("expected array, got %T", result)
 	}
-	if len(arr) != 2 {
-		t.Fatalf("expected 2 elements (type + length), got %d", len(arr))
+	if len(arr) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(arr))
+	}
+	if arr[0] != "a" || arr[1] != "b" || arr[2] != "c" {
+		t.Errorf("array elements not preserved: %v", arr)
 	}
 }
 
-func TestNormalizeJSON_EmptyArray(t *testing.T) {
+func TestSortJSONKeys_EmptyArray(t *testing.T) {
 	input := []interface{}{}
-	result := normalizeJSON(input)
+	result := sortJSONKeys(input)
 	arr, ok := result.([]interface{})
 	if !ok {
 		t.Fatalf("expected array, got %T", result)
@@ -763,36 +808,57 @@ func TestNormalizeJSON_EmptyArray(t *testing.T) {
 	}
 }
 
-func TestNormalizeJSON_Scalar(t *testing.T) {
-	result := normalizeJSON("hello")
+func TestSortJSONKeys_Scalar(t *testing.T) {
+	result := sortJSONKeys("hello")
 	s, ok := result.(string)
 	if !ok {
 		t.Fatalf("expected string, got %T", result)
 	}
-	if s != "string" {
-		t.Errorf("result = %q, want 'string'", s)
+	if s != "hello" {
+		t.Errorf("result = %q, want 'hello'", s)
 	}
 }
 
-func TestNormalizeJSON_NilValue(t *testing.T) {
-	result := normalizeJSON(nil)
-	s, ok := result.(string)
-	if !ok {
-		t.Fatalf("expected string, got %T", result)
-	}
-	if s != "<nil>" {
-		t.Errorf("result = %q, want '<nil>'", s)
+func TestSortJSONKeys_NilValue(t *testing.T) {
+	result := sortJSONKeys(nil)
+	if result != nil {
+		t.Errorf("result = %v, want nil", result)
 	}
 }
 
 func TestHashPayload_JSONBody(t *testing.T) {
-	// Valid base64-encoded JSON should be normalized - same keys in different order should produce same hash
+	// JSON with same values but different key order should produce same hash
 	body1 := base64.StdEncoding.EncodeToString([]byte(`{"a":1,"b":2}`))
 	body2 := base64.StdEncoding.EncodeToString([]byte(`{"b":2,"a":1}`))
 	h1 := HashPayload(body1)
 	h2 := HashPayload(body2)
 	if h1 != h2 {
 		t.Errorf("JSON with same keys in different order should produce same hash: %q != %q", h1, h2)
+	}
+}
+
+func TestHashPayload_DifferentJSONValues(t *testing.T) {
+	// JSON with same keys but different values MUST produce different hashes.
+	// Regression: the old normalizeJSON replaced values with type names,
+	// causing completely different attacks (SQLi vs SSTI vs XSS) on the same
+	// endpoint to be incorrectly deduplicated.
+	body1 := base64.StdEncoding.EncodeToString([]byte(`{"a":1,"b":2}`))
+	body2 := base64.StdEncoding.EncodeToString([]byte(`{"a":999,"b":2}`))
+	h1 := HashPayload(body1)
+	h2 := HashPayload(body2)
+	if h1 == h2 {
+		t.Errorf("JSON with different values should produce different hashes: %q", h1)
+	}
+}
+
+func TestHashPayload_NestedJSON(t *testing.T) {
+	// Nested JSON objects should have keys sorted recursively
+	body1 := base64.StdEncoding.EncodeToString([]byte(`{"outer":{"b":2,"a":1}}`))
+	body2 := base64.StdEncoding.EncodeToString([]byte(`{"outer":{"a":1,"b":2}}`))
+	h1 := HashPayload(body1)
+	h2 := HashPayload(body2)
+	if h1 != h2 {
+		t.Errorf("Nested JSON with same values in different key order should produce same hash: %q != %q", h1, h2)
 	}
 }
 

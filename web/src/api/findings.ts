@@ -1,6 +1,7 @@
 import type {
     Finding,
     ArtifactPayload,
+    LLMAnalysis,
     ReproduceResponse,
 } from "@/types/api";
 import { get, post, API_BASE } from "./client";
@@ -32,4 +33,8 @@ export function reproduceFinding(
     return post<ReproduceResponse>(`${API_BASE}/findings/${id}/reproduce`, {
         runs,
     });
+}
+
+export function analyzeFinding(id: string): Promise<LLMAnalysis> {
+    return post<LLMAnalysis>(`${API_BASE}/findings/${id}/analyze`);
 }

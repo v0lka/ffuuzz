@@ -39,8 +39,10 @@ type RecordingStore interface {
 type CampaignStore interface {
 	GetByID(ctx context.Context, id string) (*model.Campaign, error)
 	Create(ctx context.Context, c model.Campaign) error
+	CreateWithFilter(ctx context.Context, c model.Campaign, scheme, host string, port int, pathPrefix string) (int, error)
 	List(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error)
 	AddRecordingsByFilter(ctx context.Context, campaignID, scheme, host string, port int, pathPrefix string) (int, error)
+	Update(ctx context.Context, c model.Campaign) error
 }
 
 // FindingStore defines the finding operations needed by the API.
@@ -77,6 +79,7 @@ type Server struct {
 	artifactDir string
 	webFS       fs.FS
 	logger      zerolog.Logger
+	envPath     string // path to .env file for config API
 }
 
 // ServerConfig bundles all dependencies for the API server.
@@ -92,6 +95,7 @@ type ServerConfig struct {
 	ArtifactDir string
 	WebFS       fs.FS // Embedded SPA assets (nil = SPA disabled)
 	Logger      zerolog.Logger
+	EnvPath     string // path to .env file
 }
 
 // NewServer creates a fully configured Gin-based API server.
@@ -112,6 +116,7 @@ func NewServer(cfg ServerConfig) *Server {
 		artifactDir: cfg.ArtifactDir,
 		webFS:       cfg.WebFS,
 		logger:      cfg.Logger,
+		envPath:     cfg.EnvPath,
 	}
 
 	// Middleware: X-Request-ID injection + request logging
@@ -135,6 +140,7 @@ func NewServer(cfg ServerConfig) *Server {
 		v1.DELETE("/recordings/:id", s.deleteRecording)
 
 		// Campaigns
+		v1.POST("/campaigns/quick", s.quickCreateCampaign)
 		v1.POST("/campaigns", s.createCampaign)
 		v1.GET("/campaigns", s.listCampaigns)
 		v1.GET("/campaigns/:id", s.getCampaign)
@@ -146,6 +152,7 @@ func NewServer(cfg ServerConfig) *Server {
 		v1.POST("/campaigns/:id/stop", s.stopCampaign)
 		v1.POST("/campaigns/:id/recordings", s.addRecordingsToCampaign)
 		v1.POST("/campaigns/:id/analyze", s.analyzeCampaign)
+		v1.POST("/campaigns/:id", s.editCampaign)
 
 		// Findings
 		v1.GET("/findings", s.listFindings)
@@ -153,6 +160,10 @@ func NewServer(cfg ServerConfig) *Server {
 		v1.GET("/findings/:id/artifact", s.getFindingArtifact)
 		v1.POST("/findings/:id/reproduce", s.reproduceFinding)
 		v1.POST("/findings/:id/analyze", s.analyzeFinding)
+
+		// Configuration
+		v1.GET("/config", s.getConfig)
+		v1.PUT("/config", s.updateConfig)
 	}
 
 	// Root redirect → SPA

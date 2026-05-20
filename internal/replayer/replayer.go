@@ -74,9 +74,13 @@ func (r *Replayer) ReplayExchange(ctx context.Context, ex model.Exchange, baseUR
 		}
 	}
 
-	// Disable compression to ensure readable response bodies
-	// (Go's http.Client doesn't auto-decompress Brotli, only gzip)
-	req.Header.Set("Accept-Encoding", "identity")
+	// Remove any explicit Accept-Encoding so Go's net/http transport sets
+	// it to "gzip" automatically and transparently decompresses gzipped
+	// response bodies. Forcing "identity" (or passing through a recorded
+	// "gzip, deflate, br") leaves compressed bytes in the response body,
+	// which then bypass anomaly detectors and confuse analysts inspecting
+	// the saved exchange.
+	req.Header.Del("Accept-Encoding")
 
 	// Choose client
 	client := r.DefaultClient

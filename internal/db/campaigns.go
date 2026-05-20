@@ -242,6 +242,65 @@ func (s *CampaignStore) IncrementStats(ctx context.Context, id string, testsDelt
 	return nil
 }
 
+// CreateWithFilter atomically creates a campaign and populates it with recordings matching
+// the given filter. Returns the number of linked recordings. If no recordings match, the
+// transaction is rolled back and an error is returned.
+func (s *CampaignStore) CreateWithFilter(ctx context.Context, c model.Campaign, scheme, host string, port int, pathPrefix string) (int, error) {
+	cfgJSON, err := json.Marshal(c.Config)
+	if err != nil {
+		return 0, fmt.Errorf("marshal config: %w", err)
+	}
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit returns sql.ErrTxDone
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO campaigns (id, name, status, created_at, updated_at, config)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		c.ID, c.Name, string(c.Status), c.CreatedAt, c.UpdatedAt, cfgJSON,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("insert campaign: %w", err)
+	}
+
+	var res sql.Result
+	if pathPrefix != "" {
+		res, err = tx.ExecContext(ctx, `
+			INSERT INTO campaign_recordings (campaign_id, recording_id)
+			SELECT $1, r.id FROM recordings r
+			WHERE r.target_scheme = $2 AND r.target_host = $3 AND r.target_port = $4
+			  AND r.target_path LIKE $5 ESCAPE '\'
+			ON CONFLICT (campaign_id, recording_id) DO NOTHING`,
+			c.ID, scheme, host, port, pathPrefix+"%")
+	} else {
+		res, err = tx.ExecContext(ctx, `
+			INSERT INTO campaign_recordings (campaign_id, recording_id)
+			SELECT $1, r.id FROM recordings r
+			WHERE r.target_scheme = $2 AND r.target_host = $3 AND r.target_port = $4
+			ON CONFLICT (campaign_id, recording_id) DO NOTHING`,
+			c.ID, scheme, host, port)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("add recordings by filter: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("rows affected unavailable for create with filter")
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("no recordings match the filter")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+	return int(n), nil
+}
+
 // AddRecordingsByFilter adds recordings matching the given origin and optional path prefix
 // to a campaign. Duplicates are silently skipped. Returns the number of newly added recordings.
 func (s *CampaignStore) AddRecordingsByFilter(ctx context.Context, campaignID, scheme, host string, port int, pathPrefix string) (int, error) {
@@ -274,4 +333,42 @@ func (s *CampaignStore) AddRecordingsByFilter(ctx context.Context, campaignID, s
 		s.logger.Warn().Err(err).Msg("rows affected unavailable for add recordings by filter")
 	}
 	return int(n), nil
+}
+
+// Update replaces the campaign name, config and recording links atomically.
+func (s *CampaignStore) Update(ctx context.Context, c model.Campaign) error {
+	cfgJSON, err := json.Marshal(c.Config)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit returns sql.ErrTxDone
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE campaigns SET name=$1, updated_at=$2, config=$3 WHERE id=$4`,
+		c.Name, c.UpdatedAt, cfgJSON, c.ID)
+	if err != nil {
+		return fmt.Errorf("update campaign: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`DELETE FROM campaign_recordings WHERE campaign_id=$1`, c.ID)
+	if err != nil {
+		return fmt.Errorf("delete recording links: %w", err)
+	}
+
+	for _, rid := range c.RecordingIDs {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO campaign_recordings (campaign_id, recording_id) VALUES ($1, $2)`,
+			c.ID, rid)
+		if err != nil {
+			return fmt.Errorf("link recording %s: %w", rid, err)
+		}
+	}
+
+	return tx.Commit()
 }

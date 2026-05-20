@@ -6,11 +6,11 @@ Handles deduplication, confirmation, minimization, severity scoring, OWASP categ
 
 ## Key Files
 
-| File | Role |
-|------|------|
-| `internal/triage/triage.go` | `Triager` struct with signature, confirm, minimize, severity, categorization, grouping |
-| `internal/triage/llm.go` | `LLMTriager` struct: orchestrate LLM-based finding analysis and batch processing |
-| `internal/triage/llm_provider.go` | `LLMProvider` interface and request/input types |
+| File                              | Role                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `internal/triage/triage.go`       | `Triager` struct with signature, confirm, minimize, severity, categorization, grouping |
+| `internal/triage/llm.go`          | `LLMTriager` struct: orchestrate LLM-based finding analysis and batch processing       |
+| `internal/triage/llm_provider.go` | `LLMProvider` interface and request/input types                                        |
 
 ## Core Types
 
@@ -71,21 +71,27 @@ type LLMReportInput struct {
 ## Public API
 
 ### `Signature(hit AnomalyHit) string`
-Computes a deduplication signature: `TYPE|METHOD|normalizedPath|hash(payload)`.
+
+Computes a deduplication signature: `TYPE|METHOD|normalizedPath|statusCode|hash(payload)`.
+
 - `TYPE`: finding type (TIMEOUT, SERVER_ERROR, etc.)
 - `METHOD`: HTTP method
 - `normalizedPath`: path with UUIDs, numeric IDs, and long fuzz segments replaced (`NormalizePath()`)
-- `hash(payload)`: first 16 hex chars of SHA-256 of the JSON-normalized request body
+- `statusCode`: HTTP response status code (0 for timeout/non-HTTP findings)
+- `hash(payload)`: first 16 hex chars of SHA-256 of the key-sorted JSON request body (values preserved)
 
 Returns a deterministic string usable for database dedup via `ExistsBySignature()`.
 
 ### `Confirm(ctx, session, baseURL, detector, anomalyCfg, baseline, rep, runs, timeout, logger) (bool, int, error)`
+
 Replays the entire session `runs` times (default 3). Returns `(confirmed, reproducedCount, error)`. `confirmed` is `true` if the anomaly reproduced in at least `ceil(runs/2)` runs. The `reproduced` count is used to compute `Reproducibility = reproduced / runs` for severity scoring. This is the gate between `UNCONFIRMED` and `CONFIRMED` finding status.
 
 ### `ScoreSeverity(findingType, endpoint, method, mutationType, reproducibility, responseStatus) Severity`
+
 Computes severity using a weighted formula: `endpointWeight × typeWeight × mutationTypeWeight × reproducibilityMultiplier`. Returns one of: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`. Called twice: at finding creation (reproducibility=0, conservative estimate) and after confirmation (actual reproducibility from Confirm runs).
 
 Weight factors:
+
 - **Endpoint weight**: 1.0 for `/auth/` paths, 0.8 for `/admin/` paths, 0.4 default
 - **Type weight**: 1.0 (SERVER_ERROR), 0.8 (TIMEOUT), 0.7 (STATUS_CODE_ANOMALY/BEHAVIOR_ANOMALY), 0.5 default
 - **Mutation type weight**: 1.0 (primitive), 0.9 (json), 0.7 (header/uri/param), 0.5 default
@@ -94,51 +100,67 @@ Weight factors:
 Severity thresholds: CRITICAL ≥ 0.8, HIGH ≥ 0.6, MEDIUM ≥ 0.4, LOW ≥ 0.2, INFO < 0.2.
 
 ### `CategorizeFinding(findingType, mutationType, responseBody, httpStatus) OWASPCategory`
+
 Maps the finding to an OWASP Top 10 2025 category based on mutation type, response body patterns, and finding type. Categories: `A02_SECURITY_MISCONFIGURATION`, `A04_CRYPTOGRAPHIC_FAILURES`, `A05_INJECTION`, `A06_INSECURE_DESIGN`, `A07_AUTHENTICATION_FAILURES`, `A10_EXCEPTIONAL_CONDITIONS`, or `UNCATEGORIZED`.
 
 ### `GroupFindings(findings []Finding) map[string][]Finding`
+
 Groups findings by a composite key: `Type|MutationPrefix|EndpointPattern|HTTPStatusRange`. The endpoint pattern uses only the first path segment (or "root" for "/"). When grouping is applied during campaign stop or periodically every 15s, findings in each group share a common `GroupID`.
 
 ### `GetContentType(req RequestData) string`
+
 Extracts the content-type from a request's headers, stripping parameters (e.g., `"application/json; charset=utf-8"` → `"application/json"`). Used to route minimization to the correct strategy.
 
 ### `MinimizeQueryParams(ctx, session, exchangeIdx, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) (*RecordingSession, error)`
+
 Applies delta-debugging to URL query parameters in form-encoded bodies (`application/x-www-form-urlencoded`). Splits params into halves, removes one half, and checks if the anomaly still triggers. Returns a session with the minimized body.
 
 ### `MinimizeXMLBody(ctx, session, exchangeIdx, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) (*RecordingSession, error)`
+
 Applies delta-debugging to XML elements in XML request bodies. Parses XML into a key-value map, then uses binary-search key removal. Returns a session with the minimized body.
 
 ### `MinimizeMultipartBody(ctx, session, exchangeIdx, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) (*RecordingSession, error)`
+
 Applies iterative removal to multipart form data parts. Removes one part at a time, rebuilding the multipart body. Returns a session with the minimized body.
 
 ### `MinimizeSession(ctx, session, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) (*RecordingSession, error)`
+
 Tries removing each exchange from the session (starting from the last, never removing the first). After each removal, replays to check if the anomaly still triggers. Returns the minimal session. Sessions with ≤1 exchange are returned as-is.
 
 ### `MinimizeJSONBody(ctx, session, exchangeIdx, baseURL, detector, anomalyCfg, baseline, rep, timeout, logger) (*RecordingSession, error)`
+
 Applies binary-search delta-debugging to remove unnecessary JSON keys from the body of the exchange at `exchangeIdx`. Recurses into nested objects up to depth 5. Returns a session with the minimized body, or `nil, nil` if no reduction was possible.
 
 ### `NormalizePath(path string) string`
+
 Standalone helper. Replaces UUIDs → `{uuid}`, numeric IDs → `{id}`, and segments ≥ 64 chars → `{fuzz}`.
 
 ### `HashPayload(bodyB64 string) string`
+
 Standalone helper. For JSON bodies: decodes, sorts keys, replaces values with type names, re-marshals, and SHA-256 hashes. For non-JSON: hashes the raw bytes.
 
 ### `HasJSONBody(ex Exchange) bool`
+
 Standalone helper. Checks content-type header and body structure.
 
 ### `LLM: AnalyzeFinding(ctx, finding, artifactData) (*model.LLMAnalysis, error)`
+
 Sends finding context (type, endpoint, mutation, response snippet, baseline/anomalous status) to the configured LLM provider. Returns a structured `LLMAnalysis` with classification, severity, confidence (0.0-1.0), exploitability assessment, and remediation advice. No-op when LLM is disabled (provider is nil). Logs a warning on LLM failure.
 
 ### `LLM: GenerateDescription(ctx, finding) (string, error)`
+
 Produces a concise human-readable description of a finding for UI display. Uses the finding's existing `LLMAnalysis` classification as context. No-op when LLM is disabled.
 
 ### `LLM: BatchAnalyze(ctx, findings, artifactGetter, onResult)`
+
 Iterates over a slice of findings, loading artifact data via `artifactGetter` and calling `AnalyzeFinding` for each. Calls `onResult(findingID, analysis)` for each successfully analyzed finding so the caller can persist results. Respects context cancellation between findings. Logs progress every 10 findings. No-op when LLM is disabled.
 
 ### `LLM: GenerateReport(ctx, findings) (string, error)`
+
 Produces an executive summary and recommendations from a set of finding summaries (ID, endpoint, type, severity, classification). No-op when LLM is disabled.
 
 ### `LLM: MarshalAnalysis(a *model.LLMAnalysis) []byte`
+
 Serializes an `LLMAnalysis` to JSON bytes for database storage. Returns `nil` when input is `nil` or marshaling fails.
 
 ## Flow
@@ -177,6 +199,50 @@ For each hit:
     │       minimized = MinimizeMultipartBody(minimized, exchangeIdx, ...)
     │
     └── create Artifact with minimized session (update finding severity/reproducibility)
+
+
+After campaign stop, or on-demand from UI:
+
+    ┌─────────────────────────────────────────────────┐
+    │  UI: Finding Detail Page                        │
+    │  "Analyze with LLM" button                       │
+    └──────────────────┬──────────────────────────────┘
+                       │ POST /api/v1/findings/:id/analyze
+                       ▼
+    ┌─────────────────────────────────────────────────┐
+    │  LLMTriager.AnalyzeFinding(ctx, finding, artifact)│
+    │  ─ Sends finding context to LLM provider         │
+    │  ─ Returns LLMAnalysis (synchronous)             │
+    │  ─ findings.UpdateLLMAnalysis(id, JSON)          │
+    └──────────────────┬──────────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────────┐
+    │  UI renders LLM Analysis card:                  │
+    │  classification, severity, confidence,          │
+    │  exploitability, remediation, description       │
+    └─────────────────────────────────────────────────┘
+
+    ┌─────────────────────────────────────────────────┐
+    │  UI: Campaign Detail Page                       │
+    │  "Batch LLM analyze" button                      │
+    └──────────────────┬──────────────────────────────┘
+                       │ POST /api/v1/campaigns/:id/analyze (202 Accepted)
+                       ▼
+    ┌─────────────────────────────────────────────────┐
+    │  LLMTriager.BatchAnalyze(ctx, unconfirmed,       │
+    │      artifactGetter, onResult)                   │
+    │  ─ Background goroutine (10 min timeout)         │
+    │  ─ Iterates unconfirmed findings                 │
+    │  ─ Calls AnalyzeFinding for each                 │
+    │  ─ Persists via findings.UpdateLLMAnalysis       │
+    └──────────────────┬──────────────────────────────┘
+                       ▼
+    ┌─────────────────────────────────────────────────┐
+    │  UI polls findings list every 2s                │
+    │  ─ Counts findings with llm_analysis set        │
+    │  ─ Progress bar: X/Y analyzed                   │
+    │  ─ Auto-dismisses 3s after completion           │
+    └─────────────────────────────────────────────────┘
 ```
 
 ## Delta-Debugging Algorithms
@@ -184,6 +250,7 @@ For each hit:
 All minimization methods use delta-debugging with `stillTriggers()` for verification at each step.
 
 **JSON Body** (`MinimizeJSONBody`):
+
 1. Collect all keys at the current level
 2. Split into two halves
 3. Try keeping only the right half (removing left keys) — if anomaly still triggers, recurse on right half
@@ -192,16 +259,19 @@ All minimization methods use delta-debugging with `stillTriggers()` for verifica
 6. After minimizing at the current level, recurse into nested objects (up to depth 5)
 
 **Query Parameters** (`MinimizeQueryParams`):
+
 1. Parse URL-encoded body into key-value pairs
 2. Apply binary-search key removal via `deltaDebugKeys()`
 3. Return minimized body rebuilt from remaining params
 
 **XML Body** (`MinimizeXMLBody`):
+
 1. Parse XML into flat key-value map (shallow, no attributes)
 2. Apply binary-search key removal via `deltaDebugKeys()`
 3. Re-serialize remaining map back to XML
 
 **Multipart** (`MinimizeMultipartBody`):
+
 1. Parse multipart boundary and extract individual parts
 2. Remove one part at a time (not binary-search; simpler removal)
 3. Rebuild multipart body with new boundary after each removal
@@ -245,15 +315,15 @@ Severity thresholds: `CRITICAL` ≥ 0.8, `HIGH` ≥ 0.6, `MEDIUM` ≥ 0.4, `LOW`
 
 `CategorizeFinding` maps findings to OWASP Top 10 2025 categories using keyword matching on mutation type:
 
-| OWASP Category | Matching Conditions |
-|---|---|
-| `A05_INJECTION` | Mutation contains sqli, cmdi, xxe, ssrf, template_injection, ldap_injection, or xpath_injection |
-| `A04_CRYPTOGRAPHIC_FAILURES` | Mutation contains "jwt" AND HTTP status ≥ 500 |
-| `A07_AUTHENTICATION_FAILURES` | Mutation contains "jwt" or "cookie" (non-500 status) |
-| `A02_SECURITY_MISCONFIGURATION` | Mutation contains "cors" or "origin" |
-| `A10_EXCEPTIONAL_CONDITIONS` | Response body matches stack trace patterns |
-| `A06_INSECURE_DESIGN` | Finding type is `SERVER_ERROR` with no specific match |
-| `UNCATEGORIZED` | No specific pattern matched |
+| OWASP Category                  | Matching Conditions                                                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `A05_INJECTION`                 | Mutation contains sqli, cmdi, xxe, ssrf, template_injection, ldap_injection, or xpath_injection |
+| `A04_CRYPTOGRAPHIC_FAILURES`    | Mutation contains "jwt" AND HTTP status ≥ 500                                                   |
+| `A07_AUTHENTICATION_FAILURES`   | Mutation contains "jwt" or "cookie" (non-500 status)                                            |
+| `A02_SECURITY_MISCONFIGURATION` | Mutation contains "cors" or "origin"                                                            |
+| `A10_EXCEPTIONAL_CONDITIONS`    | Response body matches stack trace patterns                                                      |
+| `A06_INSECURE_DESIGN`           | Finding type is `SERVER_ERROR` with no specific match                                           |
+| `UNCATEGORIZED`                 | No specific pattern matched                                                                     |
 
 ## Invariants
 
@@ -272,15 +342,15 @@ Severity thresholds: `CRITICAL` ≥ 0.8, `HIGH` ≥ 0.6, `MEDIUM` ≥ 0.4, `LOW`
 
 ## Dependencies
 
-| Package | Used for |
-|---------|----------|
-| `internal/anomaly` | `AnomalyHit`, `Detector`, `BaselineEntry` |
-| `internal/model` | `RecordingSession`, `Exchange`, `AnomalyConfig`, `FindingType`, `Finding`, `Severity`, `OWASPCategory`, `LLMAnalysis` |
-| `internal/replayer` | `ExchangeResult`, `WorkerContext`, `SessionReplayer` |
-| `encoding/json` | LLM analysis serialization in `MarshalAnalysis` |
-| `encoding/xml` | XML parsing/serialization for `MinimizeXMLBody` |
-| `mime/multipart` | Multipart parsing for `MinimizeMultipartBody` |
-| `net/http` | Content-type header parsing for `GetContentType` |
+| Package             | Used for                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `internal/anomaly`  | `AnomalyHit`, `Detector`, `BaselineEntry`                                                                             |
+| `internal/model`    | `RecordingSession`, `Exchange`, `AnomalyConfig`, `FindingType`, `Finding`, `Severity`, `OWASPCategory`, `LLMAnalysis` |
+| `internal/replayer` | `ExchangeResult`, `WorkerContext`, `SessionReplayer`                                                                  |
+| `encoding/json`     | LLM analysis serialization in `MarshalAnalysis`                                                                       |
+| `encoding/xml`      | XML parsing/serialization for `MinimizeXMLBody`                                                                       |
+| `mime/multipart`    | Multipart parsing for `MinimizeMultipartBody`                                                                         |
+| `net/http`          | Content-type header parsing for `GetContentType`                                                                      |
 
 ## Edge Cases
 
@@ -294,10 +364,13 @@ Severity thresholds: `CRITICAL` ≥ 0.8, `HIGH` ≥ 0.6, `MEDIUM` ≥ 0.4, `LOW`
 - **Single-param query body**: `MinimizeQueryParams` returns `nil, nil` — a single param cannot be reduced.
 - **Invalid XML body**: `MinimizeXMLBody` returns `nil, nil` without error (graceful degradation).
 - **Invalid multipart body**: `MinimizeMultipartBody` returns `nil, nil` without error (graceful degradation).
+- **Batch analysis with zero unconfirmed findings**: `analyzeCampaign` returns 200 OK with `{"analyzed": 0, "message": "no unconfirmed findings to analyze"}`.
+- **LLM disabled**: Both analyze endpoints return HTTP 503 with code `LLM_DISABLED`. The frontend buttons are always visible (user discovers the feature), but the API returns a clear error.
+- **Batch analysis progress tracking**: The frontend polls `GET /api/v1/campaigns/:id/findings?status=UNCONFIRMED` every 2 seconds and counts findings that lack `llm_analysis` to compute progress. The progress bar auto-dismisses 3 seconds after all findings are analyzed.
 
 ## Configuration
 
-| Campaign config field | Type | Default | Effect |
-|---|---|---|---|
-| `TriageConfig.ConfirmRuns` | int | 0 (min: 3) | Number of replay attempts for confirmation |
-| `TriageConfig.EnableMinimization` | bool | false | Enables all minimization (session + content-type-aware body)
+| Campaign config field             | Type | Default    | Effect                                                       |
+| --------------------------------- | ---- | ---------- | ------------------------------------------------------------ |
+| `TriageConfig.ConfirmRuns`        | int  | 0 (min: 3) | Number of replay attempts for confirmation                   |
+| `TriageConfig.EnableMinimization` | bool | false      | Enables all minimization (session + content-type-aware body) |

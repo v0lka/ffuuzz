@@ -41,6 +41,8 @@ make build
 
 FFUZZ loads configuration from `.env`, environment variables, and CLI flags (in that priority). Copy `.env.example` to `.env` to get started with all available options and detailed comments. Variable expansion syntax (`${VAR}`) is supported for referencing other environment variables within the file.
 
+Configuration can also be edited through the Web UI via the **Configuration** page in the left sidebar. The form displays all `FFUUZZ_*` settings grouped by category (Server, Database, Storage, Performance, TLS, Certificate Cache, LLM) with inline validation. Changes are written directly to the `.env` file and take effect on the next server restart.
+
 ### Development
 
 ```bash
@@ -52,7 +54,7 @@ make lint           # Run linters
 
 ## Documentation
 
-- **[User Guide](docs/user-guide.md)** -- Installation, configuration, usage workflow, mutation operators, anomaly detection, and full REST API reference.
+- **[User Guide](docs/user-guide.md)** -- Installation, configuration, usage workflow, mutation operators, anomaly detection, LLM-assisted triage (with UI controls for single-finding and batch analysis), campaign editing, and full REST API reference.
 - **[Contributing](docs/contributing.md)** -- Development setup, project structure, architecture overview, key packages, and guidelines for adding new features.
 
 ## License

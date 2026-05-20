@@ -76,13 +76,25 @@ type CampaignLimits struct {
 }
 
 // MutationConfig controls which mutation strategies are enabled and their intensity.
+// Operator lists (URI, Header, JSON, Param, Primitive, Sequence) allow fine-grained
+// control over individual mutation operators within each category. When nil or empty,
+// all operators in that category are enabled.
 type MutationConfig struct {
-	PathQuery bool    `json:"path_query"`
-	Headers   bool    `json:"headers"`
-	JSONBody  bool    `json:"json_body"`
-	Params    bool    `json:"params"`
-	Sequence  bool    `json:"sequence"`
-	Intensity float64 `json:"intensity"`
+	PathQuery   bool    `json:"path_query"`
+	Headers     bool    `json:"headers"`
+	JSONBody    bool    `json:"json_body"`
+	Params      bool    `json:"params"`
+	Sequence    bool    `json:"sequence"`
+	Intensity   float64 `json:"intensity"`
+
+	// Per-category operator filters. Only listed operators are enabled.
+	// Nil/empty means all operators in that category are enabled.
+	URI       []string `json:"uri_operators,omitempty"`
+	Header    []string `json:"header_operators,omitempty"`
+	JSON      []string `json:"json_operators,omitempty"`
+	Param     []string `json:"param_operators,omitempty"`
+	Primitive []string `json:"primitive_operators,omitempty"`
+	Seq       []string `json:"sequence_operators,omitempty"`
 }
 
 // AnomalyConfig controls which anomaly detectors are active.
@@ -178,6 +190,17 @@ type FindingDetails struct {
 	ObservedMs int64 `json:"observed_ms,omitempty"`
 	TimeoutMs  int64 `json:"timeout_ms,omitempty"`
 	HTTPStatus int   `json:"http_status,omitempty"`
+
+	// Regex detector context (populated for FindingRegexMatch).
+	RegexPattern  string `json:"regex_pattern,omitempty"`
+	MatchOffset   int    `json:"match_offset,omitempty"`
+	MatchSnippet  string `json:"match_snippet,omitempty"`
+	BodyTotalSize int    `json:"body_total_size,omitempty"`
+
+	// ExchangeIndex identifies which exchange in the artifact session
+	// produced this finding (0-based). The companion field on the artifact
+	// payload is MatchedExchangeIndex.
+	ExchangeIndex int `json:"exchange_index,omitempty"`
 }
 
 // LLMAnalysis holds the structured result of an LLM-based triage analysis.
@@ -220,6 +243,8 @@ type Finding struct {
 	ReproduceRuns       int            `json:"reproduce_runs,omitempty" db:"reproduce_runs"`
 	MutationType        string         `json:"mutation_type,omitempty" db:"mutation_type"`
 	MutationPayload     string         `json:"mutation_payload,omitempty" db:"mutation_payload"`
+	MutationOps         []string       `json:"mutation_ops,omitempty"`
+	RegexPatterns       []string       `json:"regex_patterns,omitempty"`
 	Severity            Severity       `json:"severity" db:"severity"`
 	OWASPCategory       OWASPCategory  `json:"owasp_category" db:"owasp_category"`
 	GroupID             *string        `json:"group_id,omitempty" db:"group_id"`
@@ -272,13 +297,15 @@ const (
 
 // ArtifactPayload is the JSON structure written to artifact files.
 type ArtifactPayload struct {
-	FindingID        string           `json:"finding_id"`
-	CampaignID       string           `json:"campaign_id"`
-	Target           TargetURL        `json:"target"`
-	FailureCriterion FailureCriterion `json:"failure_criterion"`
-	Session          RecordingSession `json:"session"`
-	MutationSeed     int64            `json:"mutation_seed"`
-	MutationOps      []string         `json:"mutation_ops,omitempty"`
+	FindingID            string           `json:"finding_id"`
+	CampaignID           string           `json:"campaign_id"`
+	Target               TargetURL        `json:"target"`
+	FailureCriterion     FailureCriterion `json:"failure_criterion"`
+	Session              RecordingSession `json:"session"`
+	MutationSeed         int64            `json:"mutation_seed"`
+	MutationOps          []string         `json:"mutation_ops,omitempty"`
+	OperatorsByExchange  [][]string       `json:"operators_by_exchange,omitempty"`
+	MatchedExchangeIndex *int             `json:"matched_exchange_index,omitempty"`
 }
 
 // FailureCriterion describes the expected anomaly type for reproduction.

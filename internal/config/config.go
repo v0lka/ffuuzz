@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -80,7 +81,7 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Enabled:   false,
-			Timeout:   30 * time.Second,
+			Timeout:   120 * time.Second,
 			MaxTokens: 4096,
 		},
 	}
@@ -93,8 +94,13 @@ func Load(args []string) (*Config, error) {
 
 	// Load .env file if present. Does not override already-set environment
 	// variables (real env takes precedence over .env). Supports ${VAR} and
-	// $VAR expansion for referencing other variables within the file.
-	_ = godotenv.Load()
+	// $VAR expansion against (a) the OS environment of the running process
+	// and (b) variables defined earlier within the .env file itself.
+	//
+	// Note: godotenv v1.5.1's built-in expansion only consults in-file
+	// variables and ignores the OS environment, so we pre-expand OS-env
+	// references in the raw file content before handing it to godotenv.
+	_ = loadDotEnv(".env")
 
 	// Environment variables (from real env or loaded .env)
 	if v := os.Getenv("FFUUZZ_API_ADDRESS"); v != "" {
@@ -251,4 +257,47 @@ func Load(args []string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadDotEnv reads a .env file at path, expands ${VAR}/$VAR references against
+// the OS environment of the running process, then parses it with godotenv and
+// sets each resulting key in the OS environment if it is not already set.
+//
+// This wraps godotenv to fix a v1.5.1 limitation: godotenv's built-in variable
+// expansion only resolves references against variables defined earlier in the
+// same .env file and does NOT consult os.Environ. Pre-expanding the raw file
+// content with os.Expand restores the documented behavior of being able to
+// reference shell-exported variables (e.g. FFUUZZ_LLM_API_KEY=${OPENAI_API_KEY}).
+//
+// Returns nil if the file does not exist (the .env file is optional).
+func loadDotEnv(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	// Pre-expand references that resolve from the OS environment. References
+	// to names that are not in the OS environment are preserved verbatim so
+	// godotenv can still resolve them against earlier in-file definitions.
+	expanded := os.Expand(string(data), func(name string) string {
+		if v, ok := os.LookupEnv(name); ok {
+			return v
+		}
+		return "${" + name + "}"
+	})
+
+	envMap, err := godotenv.Parse(strings.NewReader(expanded))
+	if err != nil {
+		return err
+	}
+
+	for key, value := range envMap {
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, value)
+		}
+	}
+	return nil
 }

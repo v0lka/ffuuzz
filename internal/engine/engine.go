@@ -4,11 +4,8 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,6 +24,7 @@ import (
 type CampaignStore interface {
 	UpdateStatus(ctx context.Context, id string, oldStatus, newStatus model.CampaignStatus) (bool, error)
 	IncrementStats(ctx context.Context, id string, testsDelta, findingsDelta int) error
+	List(ctx context.Context, statusFilter string, limit, offset int) ([]model.Campaign, error)
 }
 
 // FindingStore defines the finding operations needed by the engine.
@@ -37,7 +35,6 @@ type FindingStore interface {
 	GetByID(ctx context.Context, id string) (*model.Finding, error)
 	ClaimNextReproduceJob(ctx context.Context) (string, int, bool, error)
 	SetReproduceStatus(ctx context.Context, id, status string) error
-	UpdateLLMAnalysis(ctx context.Context, id string, analysisJSON []byte) error
 }
 
 // GroupingStore extends FindingStore with grouping operations for vulnerability grouping.
@@ -59,7 +56,6 @@ type Engine struct {
 	findings    FindingStore
 	artifacts   ArtifactStore
 	corpus      *corpus.Manager
-	llmTriager  *triage.LLMTriager
 	artifactDir string
 	logger      zerolog.Logger
 
@@ -76,7 +72,6 @@ func NewEngine(
 	findings FindingStore,
 	artifacts ArtifactStore,
 	corpus *corpus.Manager,
-	llmTriager *triage.LLMTriager,
 	artifactDir string,
 	logger zerolog.Logger,
 ) *Engine {
@@ -85,7 +80,6 @@ func NewEngine(
 		findings:    findings,
 		artifacts:   artifacts,
 		corpus:      corpus,
-		llmTriager:  llmTriager,
 		artifactDir: artifactDir,
 		logger:      logger,
 		running:     make(map[string]context.CancelFunc),
@@ -177,17 +171,25 @@ func (e *Engine) runCampaign(
 
 	// Setup mutation pipeline
 	mutateCfg := mutate.Config{
-		PathQuery: cfg.Mutations.PathQuery,
-		Headers:   cfg.Mutations.Headers,
-		JSONBody:  cfg.Mutations.JSONBody,
-		Params:    cfg.Mutations.Params,
-		Sequence:  cfg.Mutations.Sequence,
-		Intensity: cfg.Mutations.Intensity,
+		PathQuery:          cfg.Mutations.PathQuery,
+		Headers:            cfg.Mutations.Headers,
+		JSONBody:           cfg.Mutations.JSONBody,
+		Params:             cfg.Mutations.Params,
+		Sequence:           cfg.Mutations.Sequence,
+		Intensity:          cfg.Mutations.Intensity,
+		URIEnabledOps:      cfg.Mutations.URI,
+		HeaderEnabledOps:   cfg.Mutations.Header,
+		JSONEnabledOps:     cfg.Mutations.JSON,
+		ParamEnabledOps:    cfg.Mutations.Param,
+		PrimitiveEnabledOps: cfg.Mutations.Primitive,
+		SequenceEnabledOps: cfg.Mutations.Seq,
 	}
 	pipeline := mutate.NewPipeline(mutateCfg)
 	var seqMutator *mutate.SeqMutator
 	if cfg.Mutations.Sequence {
-		seqMutator = &mutate.SeqMutator{}
+		seqMutator = &mutate.SeqMutator{
+			EnabledOps: mutate.FilterOperators(cfg.Mutations.Seq, mutate.AllSeqOps),
+		}
 	}
 
 	// Extract real header values from recorded traffic into the dictionary
@@ -345,11 +347,11 @@ func (e *Engine) runCampaign(
 		finalStatus = model.CampaignStopped
 	}
 
-	_, err := e.campaigns.UpdateStatus(context.Background(), campaignID, model.CampaignRunning, finalStatus)
-	if err != nil {
+	ok, err := e.campaigns.UpdateStatus(context.Background(), campaignID, model.CampaignRunning, finalStatus)
+	if !ok || err != nil {
 		// Try from STOPPING state (if StopCampaign was called)
-		_, err2 := e.campaigns.UpdateStatus(context.Background(), campaignID, model.CampaignStopping, finalStatus)
-		if err2 != nil {
+		ok2, err2 := e.campaigns.UpdateStatus(context.Background(), campaignID, model.CampaignStopping, finalStatus)
+		if !ok2 || err2 != nil {
 			logger.Error().Err(err).Str("campaign_id", campaignID).
 				Str("target_status", string(finalStatus)).
 				Msg("failed to set final campaign status from both RUNNING and STOPPING")
@@ -376,52 +378,6 @@ func (e *Engine) runCampaign(
 			logger.Info().Int("groups", len(groups)).Int("findings", len(findings)).Msg("grouping complete")
 		}
 	}
-
-	// Post-campaign LLM batch analysis of unconfirmed findings
-	if e.llmTriager != nil {
-		artifactGetter := func(findingID string) (*model.ArtifactPayload, error) {
-			artifact, err := e.artifacts.GetByFindingID(context.Background(), findingID)
-			if err != nil {
-				return nil, err
-			}
-			filePath := filepath.Join(e.artifactDir, artifact.FilePath)
-			data, err := os.ReadFile(filePath)
-			if err != nil {
-				return nil, err
-			}
-			var payload model.ArtifactPayload
-			if err := json.Unmarshal(data, &payload); err != nil {
-				return nil, err
-			}
-			return &payload, nil
-		}
-
-		llmCtx, llmCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer llmCancel()
-
-		var llmFindings []model.Finding
-		if gs, ok := e.findings.(GroupingStore); ok {
-			var err error
-			llmFindings, err = gs.ListAll(llmCtx, campaignID, "", string(model.FindingUnconfirmed), nil, 10000, 0)
-			if err != nil {
-				logger.Warn().Err(err).Msg("llm batch: list findings failed")
-			}
-		}
-
-		if len(llmFindings) > 0 {
-			logger.Info().Int("count", len(llmFindings)).Msg("starting llm batch analysis")
-			e.llmTriager.BatchAnalyze(llmCtx, llmFindings, artifactGetter, func(findingID string, analysis *model.LLMAnalysis) {
-				jsonData, err := triage.MarshalAnalysis(analysis)
-				if err != nil {
-					logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: marshal analysis failed")
-					return
-				}
-				if err := e.findings.UpdateLLMAnalysis(context.Background(), findingID, jsonData); err != nil {
-					logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: persist analysis failed")
-				}
-			})
-		}
-	}
 }
 
 // StopCampaign cancels a running campaign.
@@ -435,12 +391,13 @@ func (e *Engine) StopCampaign(ctx context.Context, id string) error {
 	}
 
 	// Transition to STOPPING
-	_, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignRunning, model.CampaignStopping)
+	ok, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignRunning, model.CampaignStopping)
+	if !ok && err == nil {
+		// Status was not RUNNING (likely STARTING), try from STARTING
+		_, err = e.campaigns.UpdateStatus(ctx, id, model.CampaignStarting, model.CampaignStopping)
+	}
 	if err != nil {
-		// Try from STARTING
-		if _, err := e.campaigns.UpdateStatus(ctx, id, model.CampaignStarting, model.CampaignStopping); err != nil {
-			e.logger.Warn().Err(err).Str("campaign_id", id).Msg("fallback status transition to STOPPING failed")
-		}
+		e.logger.Warn().Err(err).Str("campaign_id", id).Msg("status transition to STOPPING failed")
 	}
 
 	cancel()
@@ -480,6 +437,35 @@ func (e *Engine) IsRunning(id string) bool {
 	defer e.mu.Unlock()
 	_, ok := e.running[id]
 	return ok
+}
+
+// RecoverStuckCampaigns scans the database for campaigns that are stuck in a
+// non-terminal state (STARTING, RUNNING, STOPPING) because the process was
+// interrupted before they could reach a terminal state. It transitions each
+// stuck campaign to STOPPED so they can be restarted or inspected.
+func (e *Engine) RecoverStuckCampaigns(ctx context.Context) {
+	stuckStatuses := []model.CampaignStatus{
+		model.CampaignStarting,
+		model.CampaignRunning,
+		model.CampaignStopping,
+	}
+
+	for _, status := range stuckStatuses {
+		campaigns, err := e.campaigns.List(ctx, string(status), 10000, 0)
+		if err != nil {
+			e.logger.Warn().Err(err).Str("status", string(status)).Msg("recover stuck campaigns: list failed")
+			continue
+		}
+
+		for _, c := range campaigns {
+			_, err := e.campaigns.UpdateStatus(ctx, c.ID, status, model.CampaignStopped)
+			if err != nil {
+				e.logger.Warn().Err(err).Str("campaign_id", c.ID).Str("from", string(status)).Str("to", string(model.CampaignStopped)).Msg("recover stuck campaigns: transition failed")
+			} else {
+				e.logger.Info().Str("campaign_id", c.ID).Str("from", string(status)).Str("to", string(model.CampaignStopped)).Msg("recovered stuck campaign")
+			}
+		}
+	}
 }
 
 func (e *Engine) failCampaign(ctx context.Context, id string, fromStatus model.CampaignStatus, reason error) {

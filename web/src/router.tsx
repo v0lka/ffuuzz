@@ -6,8 +6,10 @@ import RecordingDetailPage from "@/pages/RecordingDetailPage";
 import CampaignsPage from "@/pages/CampaignsPage";
 import CampaignCreatePage from "@/pages/CampaignCreatePage";
 import CampaignDetailPage from "@/pages/CampaignDetailPage";
+import CampaignEditPage from "@/pages/CampaignEditPage";
 import FindingsPage from "@/pages/FindingsPage";
 import FindingDetailPage from "@/pages/FindingDetailPage";
+import ConfigPage from "@/pages/ConfigPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 
 export const router = createBrowserRouter(
@@ -20,9 +22,11 @@ export const router = createBrowserRouter(
                 { path: "recordings/:id", element: <RecordingDetailPage /> },
                 { path: "campaigns", element: <CampaignsPage /> },
                 { path: "campaigns/new", element: <CampaignCreatePage /> },
+                { path: "campaigns/:id/edit", element: <CampaignEditPage /> },
                 { path: "campaigns/:id", element: <CampaignDetailPage /> },
                 { path: "findings", element: <FindingsPage /> },
                 { path: "findings/:id", element: <FindingDetailPage /> },
+                { path: "config", element: <ConfigPage /> },
                 { path: "*", element: <NotFoundPage /> },
             ],
         },

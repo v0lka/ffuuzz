@@ -15,6 +15,26 @@ import (
 	"ffuuzz/internal/triage"
 )
 
+// readFileContext reads a file, respecting context cancellation.
+// It wraps the blocking os.ReadFile in a goroutine raced against ctx.Done().
+func readFileContext(ctx context.Context, path string) ([]byte, error) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := os.ReadFile(path)
+		ch <- result{data: data, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.data, r.err
+	}
+}
+
 // analyzeFinding triggers LLM analysis for a single finding.
 func (s *Server) analyzeFinding(c *gin.Context) {
 	if s.llmTriager == nil {
@@ -41,7 +61,7 @@ func (s *Server) analyzeFinding(c *gin.Context) {
 			s.logger.Warn().Err(err).Str("finding_id", finding.ID).Msg("llm: load artifact failed")
 		} else {
 			filePath := filepath.Join(s.artifactDir, artifact.FilePath)
-			data, err := os.ReadFile(filePath)
+			data, err := readFileContext(c.Request.Context(), filePath)
 			if err != nil {
 				s.logger.Warn().Err(err).Str("finding_id", finding.ID).Msg("llm: read artifact file failed")
 			} else {
@@ -93,7 +113,7 @@ func (s *Server) analyzeCampaign(c *gin.Context) {
 		return
 	}
 
-	findings, err := s.findings.ListAll(c.Request.Context(), campaignID, "", string(model.FindingUnconfirmed), nil, 10000, 0)
+	findings, err := s.findings.ListAll(c.Request.Context(), campaignID, "", "", nil, 10000, 0)
 	if err != nil {
 		s.internalError(c, "LIST_FAILED", err)
 		return
@@ -104,13 +124,16 @@ func (s *Server) analyzeCampaign(c *gin.Context) {
 		return
 	}
 
-	artifactGetter := func(findingID string) (*model.ArtifactPayload, error) {
-		artifact, err := s.artifacts.GetByFindingID(context.Background(), findingID)
+	artifactGetter := func(ctx context.Context, findingID string) (*model.ArtifactPayload, error) {
+		artifact, err := s.artifacts.GetByFindingID(ctx, findingID)
 		if err != nil {
 			return nil, err
 		}
+		if artifact == nil {
+			return nil, nil
+		}
 		filePath := filepath.Join(s.artifactDir, artifact.FilePath)
-		data, err := os.ReadFile(filePath)
+		data, err := readFileContext(ctx, filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -129,13 +152,13 @@ func (s *Server) analyzeCampaign(c *gin.Context) {
 		defer cancel()
 		var mu sync.Mutex
 		analyzed := 0
-		s.llmTriager.BatchAnalyze(ctx, findings, artifactGetter, func(findingID string, analysis *model.LLMAnalysis) {
+		s.llmTriager.BatchAnalyze(ctx, findings, artifactGetter, func(ctx context.Context, findingID string, analysis *model.LLMAnalysis) {
 			jsonData, err := triage.MarshalAnalysis(analysis)
 			if err != nil {
 				s.logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: marshal analysis failed")
 				return
 			}
-			if err := s.findings.UpdateLLMAnalysis(context.Background(), findingID, jsonData); err != nil {
+			if err := s.findings.UpdateLLMAnalysis(ctx, findingID, jsonData); err != nil {
 				s.logger.Warn().Err(err).Str("finding_id", findingID).Msg("llm batch: persist analysis failed")
 			} else {
 				mu.Lock()

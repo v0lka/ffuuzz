@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Play, Square, Wifi, WifiOff } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { ArrowLeft, Play, Square, Wifi, WifiOff, Sparkles, Pencil } from "lucide-react";
 import {
     useCampaign,
     useCampaignStats,
@@ -8,6 +8,8 @@ import {
     useCampaignFindings,
     useStartCampaign,
     useStopCampaign,
+    useAnalyzeCampaign,
+    useBatchAnalysisProgress,
 } from "@/hooks/queries";
 import { useCampaignStream } from "@/hooks/useSSE";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
@@ -22,6 +24,16 @@ import type { CampaignStatus } from "@/types/api";
 
 const PAGE_SIZE = 20;
 
+const BATCH_STORAGE_PREFIX = "ffuuzz:batchAnalysis:";
+
+function getStoredBatchState(campaignId: string) {
+    try {
+        const raw = sessionStorage.getItem(BATCH_STORAGE_PREFIX + campaignId);
+        if (raw) return JSON.parse(raw) as { active: boolean; total: number };
+    } catch { /* ignore corrupt entries */ }
+    return { active: false, total: 0 };
+}
+
 function isActive(status: CampaignStatus) {
     return status === "RUNNING" || status === "STARTING";
 }
@@ -32,6 +44,7 @@ function canStart(status: CampaignStatus) {
 
 export default function CampaignDetailPage() {
     const { id } = useParams<{ id: string }>();
+    const navigate = useNavigate();
     const safeId = id ?? "";
     const campaign = useCampaign(safeId);
     const config = useCampaignConfig(safeId);
@@ -40,6 +53,42 @@ export default function CampaignDetailPage() {
 
     const [tab, setTab] = useState<"findings" | "config" | "info">("findings");
     const [findingOffset, setFindingOffset] = useState(0);
+    const [batchAnalysis, setBatchAnalysis] = useState<{
+        active: boolean;
+        total: number;
+    }>(() => getStoredBatchState(safeId));
+
+    // Persist batch analysis state to sessionStorage so progress survives navigation.
+    useEffect(() => {
+        if (batchAnalysis.active) {
+            sessionStorage.setItem(
+                BATCH_STORAGE_PREFIX + safeId,
+                JSON.stringify(batchAnalysis),
+            );
+        } else {
+            sessionStorage.removeItem(BATCH_STORAGE_PREFIX + safeId);
+        }
+    }, [batchAnalysis, safeId]);
+
+    const analyzeCampaignMutation = useAnalyzeCampaign();
+    const batchProgress = useBatchAnalysisProgress(
+        safeId,
+        batchAnalysis.total,
+        batchAnalysis.active,
+    );
+
+    // Auto-dismiss batch analysis progress when all findings are analyzed.
+    useEffect(() => {
+        if (
+            batchProgress.data &&
+            batchProgress.data.analyzed >= batchProgress.data.total
+        ) {
+            const timer = setTimeout(() => {
+                setBatchAnalysis({ active: false, total: 0 });
+            }, 3_000);
+            return () => clearTimeout(timer);
+        }
+    }, [batchProgress.data]);
 
     const campaignStatus = campaign.data?.status ?? "CREATED";
     const sseEnabled = isActive(campaignStatus);
@@ -90,6 +139,39 @@ export default function CampaignDetailPage() {
                     </div>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        className="btn btn-accent btn-sm"
+                        disabled={
+                            analyzeCampaignMutation.isPending ||
+                            batchAnalysis.active
+                        }
+                        onClick={() => {
+                            analyzeCampaignMutation.mutate(safeId, {
+                                onSuccess: (data) => {
+                                    setBatchAnalysis({
+                                        active: true,
+                                        total: data.total ?? 0,
+                                    });
+                                },
+                            });
+                        }}
+                    >
+                        {analyzeCampaignMutation.isPending ? (
+                            <span className="loading loading-spinner loading-sm" />
+                        ) : (
+                            <Sparkles size={16} />
+                        )}
+                        Batch LLM analyze
+                    </button>
+                    {canStart(c.status) && (
+                        <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => navigate(`/campaigns/${safeId}/edit`)}
+                        >
+                            <Pencil size={16} />
+                            Edit
+                        </button>
+                    )}
                     {canStart(c.status) && (
                         <button
                             className="btn btn-success btn-sm"
@@ -112,6 +194,27 @@ export default function CampaignDetailPage() {
                     )}
                 </div>
             </div>
+
+            {/* Batch LLM analysis progress */}
+            {batchAnalysis.active && (
+                <div className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                        <span className="opacity-60">
+                            LLM analysis:{" "}
+                            {batchProgress.data?.analyzed ?? 0} /{" "}
+                            {batchAnalysis.total} findings analyzed
+                        </span>
+                        {batchProgress.isFetching && (
+                            <span className="loading loading-spinner loading-xs" />
+                        )}
+                    </div>
+                    <progress
+                        className="progress progress-accent w-full"
+                        value={batchProgress.data?.analyzed ?? 0}
+                        max={batchAnalysis.total}
+                    />
+                </div>
+            )}
 
             {/* Stats */}
             {stats.data && (
@@ -141,8 +244,8 @@ export default function CampaignDetailPage() {
                         onClick={() => setTab(t)}
                     >
                         {t.charAt(0).toUpperCase() + t.slice(1)}
-                        {t === "findings" && findings.data
-                            ? ` (${findings.data.length})`
+                        {t === "findings"
+                            ? ` (${c.progress?.findings_total ?? 0})`
                             : ""}
                     </button>
                 ))}
@@ -155,7 +258,7 @@ export default function CampaignDetailPage() {
                         <LoadingSpinner />
                     ) : findings.data && findings.data.length > 0 ? (
                         <>
-                            <FindingsTable findings={findings.data} />
+                            <FindingsTable findings={findings.data} from={`/campaigns/${safeId}`} />
                             <Pagination
                                 offset={findingOffset}
                                 limit={PAGE_SIZE}

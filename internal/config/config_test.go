@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/tls"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -222,5 +223,71 @@ func TestLoad_CertCacheFlags(t *testing.T) {
 	}
 	if !cfg.TLS.DisableSessionTickets {
 		t.Error("expected DisableSessionTickets=true")
+	}
+}
+
+// TestLoadDotEnv_OSEnvExpansion verifies that ${VAR} references in .env are
+// expanded against the OS environment of the running process. This is the
+// regression test for the godotenv v1.5.1 limitation where its built-in
+// variable expansion only consults in-file definitions and silently produces
+// empty strings for OS-env references like FFUUZZ_LLM_API_KEY=${OPENAI_KEY}.
+func TestLoadDotEnv_OSEnvExpansion(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	content := "INFILE_VAR=hello\n" +
+		"FROM_OS=${TEST_DOTENV_OS_VAR}\n" +
+		"FROM_INFILE=${INFILE_VAR}_world\n" +
+		"UNSET_VAR=${TEST_DOTENV_NOT_SET}\n"
+	if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	t.Setenv("TEST_DOTENV_OS_VAR", "from-shell")
+	_ = os.Unsetenv("TEST_DOTENV_NOT_SET")
+	_ = os.Unsetenv("INFILE_VAR")
+	_ = os.Unsetenv("FROM_OS")
+	_ = os.Unsetenv("FROM_INFILE")
+	_ = os.Unsetenv("UNSET_VAR")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("INFILE_VAR")
+		_ = os.Unsetenv("FROM_OS")
+		_ = os.Unsetenv("FROM_INFILE")
+		_ = os.Unsetenv("UNSET_VAR")
+	})
+
+	if err := loadDotEnv(envPath); err != nil {
+		t.Fatalf("loadDotEnv: %v", err)
+	}
+
+	if got := os.Getenv("FROM_OS"); got != "from-shell" {
+		t.Errorf("FROM_OS = %q, want %q (OS-env expansion is broken)", got, "from-shell")
+	}
+	if got := os.Getenv("FROM_INFILE"); got != "hello_world" {
+		t.Errorf("FROM_INFILE = %q, want %q (in-file expansion is broken)", got, "hello_world")
+	}
+	if got := os.Getenv("UNSET_VAR"); got != "" {
+		t.Errorf("UNSET_VAR = %q, want empty", got)
+	}
+}
+
+func TestLoadDotEnv_DoesNotOverrideExistingEnv(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, []byte("TEST_DOTENV_PRESET=from-file\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	t.Setenv("TEST_DOTENV_PRESET", "from-shell")
+
+	if err := loadDotEnv(envPath); err != nil {
+		t.Fatalf("loadDotEnv: %v", err)
+	}
+	if got := os.Getenv("TEST_DOTENV_PRESET"); got != "from-shell" {
+		t.Errorf("TEST_DOTENV_PRESET = %q, want %q (real env must take precedence)", got, "from-shell")
+	}
+}
+
+func TestLoadDotEnv_MissingFileIsNotAnError(t *testing.T) {
+	if err := loadDotEnv(filepath.Join(t.TempDir(), "does-not-exist.env")); err != nil {
+		t.Errorf("loadDotEnv on missing file = %v, want nil", err)
 	}
 }

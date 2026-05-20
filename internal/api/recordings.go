@@ -294,11 +294,19 @@ func (n *trieNode) toTreePathNodes(parentPath string) []treePathNode {
 		if child.fullPath != "" {
 			fullPath = child.fullPath
 		}
+		childNodes := child.toTreePathNodes(fullPath)
+
+		// Subtree total = own count + sum of children's subtree totals.
+		subtreeTotal := child.count
+		for _, cn := range childNodes {
+			subtreeTotal += cn.RecordingCount
+		}
+
 		node := treePathNode{
 			Segment:        seg,
 			FullPath:       fullPath,
-			RecordingCount: child.count,
-			Children:       child.toTreePathNodes(fullPath),
+			RecordingCount: subtreeTotal,
+			Children:       childNodes,
 		}
 		nodes = append(nodes, node)
 	}

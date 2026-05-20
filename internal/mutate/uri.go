@@ -16,31 +16,30 @@ var invalidPercentEncodings = []string{"%", "%0", "%ZZ", "%0G", "%G0", "%%41", "
 
 // URIMutator applies mutations to URL path and query parameters.
 type URIMutator struct {
-	MaxURLLen int
+	MaxURLLen  int
+	EnabledOps []string // nil or empty = all enabled
 }
 
 func (m *URIMutator) Mutate(ex model.Exchange, rng *rand.Rand, intensity float64) MutationResult {
-	ops := rng.Intn(6)
-	var opName string
+	ops := resolveOps(m.EnabledOps, allURIOps)
+	if len(ops) == 0 {
+		return MutationResult{Exchange: ex, Operators: []string{"uri:noop"}}
+	}
 
-	switch ops {
-	case 0:
-		opName = "uri:path_segment"
+	opName := "uri:" + ops[rng.Intn(len(ops))]
+
+	switch opName {
+	case "uri:path_segment":
 		ex = m.mutatePathSegments(ex, rng)
-	case 1:
-		opName = "uri:query_param"
+	case "uri:query_param":
 		ex = m.mutateQueryParams(ex, rng)
-	case 2:
-		opName = "uri:reserved_inject"
+	case "uri:reserved_inject":
 		ex = m.injectReservedChars(ex, rng)
-	case 3:
-		opName = "uri:percent_encoding"
+	case "uri:percent_encoding":
 		ex = m.injectInvalidEncoding(ex, rng)
-	case 4:
-		opName = "uri:slash_manipulation"
+	case "uri:slash_manipulation":
 		ex = m.slashManipulation(ex, rng)
-	case 5:
-		opName = "uri:long_value"
+	case "uri:long_value":
 		ex = m.longValue(ex, rng)
 	}
 

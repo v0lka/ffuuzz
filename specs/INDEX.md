@@ -23,6 +23,7 @@ Start here to find the spec relevant to your task. Scan the **Task → Spec** ta
 | Add a new package/module | [`architecture/layers.md`](architecture/layers.md), [`META.md`](META.md) |
 | Understand a design decision | [`decisions/`](decisions/) directory |
 | Work with the frontend | [`decisions/001-go-monolith-embedded-spa.md`](decisions/001-go-monolith-embedded-spa.md) |
+| Modify configuration, `.env` file API | [`infrastructure/config.md`](infrastructure/config.md), [`contracts/cli-infrastructure.md`](contracts/cli-infrastructure.md) |
 
 ## Dependency Graph
 
